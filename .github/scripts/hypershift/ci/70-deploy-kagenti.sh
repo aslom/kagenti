@@ -55,7 +55,7 @@ cd "$REPO_ROOT"
 # Wait for nodes - increased timeout for autoscaling scenarios
 # Autoscaling can take 5-10 minutes to provision new nodes
 echo "Waiting for cluster nodes to be ready..."
-MAX_RETRIES=60
+MAX_RETRIES=90
 RETRY_DELAY=10
 for i in $(seq 1 $MAX_RETRIES); do
     # Count nodes that are NOT in Ready status
