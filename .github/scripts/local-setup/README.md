@@ -85,8 +85,7 @@ oc login https://api.your-cluster.example.com:6443 -u kubeadmin -p <password>
 oc login https://api.your-cluster.example.com:6443 -u kubeadmin -p <password>
 
 # Install Kagenti platform
-./.github/scripts/kagenti-operator/30-run-installer.sh --env ocp
-./.github/scripts/kagenti-operator/41-wait-crds.sh
+./scripts/ocp/setup-kagenti.sh --kagenti-repo .
 
 # Deploy agents and tools, run E2E tests
 ./.github/scripts/kagenti-operator/71-build-weather-tool.sh

@@ -32,27 +32,19 @@ fi
 
 echo "Deploying Kagenti to cluster..."
 
-# Set Python interpreter for Ansible (required in CI where .venv doesn't exist)
-ANSIBLE_PYTHON_INTERPRETER=$(which python3)
-export ANSIBLE_PYTHON_INTERPRETER
-
-# Create minimal secrets file for CI with auto-generated values
+# Create secrets file for setup-kagenti.sh (helm -f charts/kagenti/.secrets.yaml)
 # Use MAIN_REPO_ROOT so secrets are shared across worktrees
-SECRETS_FILE="$MAIN_REPO_ROOT/deployments/envs/.secret_values.yaml"
+SECRETS_FILE="$MAIN_REPO_ROOT/charts/kagenti/.secrets.yaml"
 if [ ! -f "$SECRETS_FILE" ]; then
     # Use real OPENAI_API_KEY from env if available (passed from GitHub secrets)
     OPENAI_KEY="${OPENAI_API_KEY:-ci-test-openai-key}"
     echo "Creating secrets file for CI..."
     cat > "$SECRETS_FILE" <<EOF
 # Auto-generated secrets for CI
-global: {}
-charts:
-  kagenti:
-    values:
-      secrets:
-        githubUser: "ci-user"
-        githubToken: "ci-token-placeholder"
-        openaiApiKey: "${OPENAI_KEY}"
+secrets:
+  githubUser: "ci-user"
+  githubToken: "ci-token-placeholder"
+  openaiApiKey: "${OPENAI_KEY}"
 EOF
 fi
 

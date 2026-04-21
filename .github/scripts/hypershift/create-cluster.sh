@@ -648,8 +648,7 @@ else
 export KUBECONFIG=$CLUSTER_KUBECONFIG
 oc get nodes
 
-./.github/scripts/kagenti-operator/30-run-installer.sh --env ocp
-./.github/scripts/kagenti-operator/41-wait-crds.sh
+./scripts/ocp/setup-kagenti.sh --kagenti-repo .
 
 ./.github/scripts/kagenti-operator/71-build-weather-tool.sh
 ./.github/scripts/kagenti-operator/72-deploy-weather-tool.sh
