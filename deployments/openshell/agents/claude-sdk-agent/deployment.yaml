@@ -1,0 +1,172 @@
+# Claude SDK Agent — OpenShell PoC
+#
+# Anthropic SDK-based code review agent with A2A protocol support.
+# Uses the Budget Proxy for LLM access (Anthropic-compatible endpoint).
+#
+# Build:   docker build -t claude-sdk-agent:latest deployments/openshell/agents/claude-sdk-agent/
+# Deploy:  kubectl apply -f deployments/openshell/agents/claude-sdk-agent/deployment.yaml
+# Destroy: kubectl delete -f deployments/openshell/agents/claude-sdk-agent/deployment.yaml
+---
+# 1. OPA sandbox policy consumed by the OpenShell supervisor
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: claude-sdk-agent-policy
+  namespace: team1
+  labels:
+    app.kubernetes.io/name: claude-sdk-agent
+    app.kubernetes.io/component: policy
+    app.kubernetes.io/managed-by: openshell
+data:
+  policy.yaml: |
+    version: 1
+    filesystem_policy:
+      include_workdir: true
+      read_only:
+        - /usr
+        - /lib
+        - /etc
+        - /app
+      read_write:
+        - /tmp
+    process:
+      run_as_user: sandbox
+      run_as_group: sandbox
+    network_policies:
+      allow_budget_proxy:
+        name: "Allow Budget Proxy (LLM)"
+        endpoints:
+          - host: "llm-budget-proxy.team1.svc"
+            port: 8080
+      allow_outbound_https:
+        name: "Allow outbound HTTPS"
+        endpoints:
+          - host: "*"
+            port: 443
+          - host: "*"
+            port: 80
+---
+# 2. Deployment — Claude SDK agent pod
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: claude-sdk-agent
+  namespace: team1
+  labels:
+    kagenti.io/type: agent
+    protocol.kagenti.io/a2a: ""
+    kagenti.io/framework: AnthropicSDK
+    kagenti.io/workload-type: deployment
+    app.kubernetes.io/name: claude-sdk-agent
+    app.kubernetes.io/managed-by: openshell
+    app.kubernetes.io/component: agent
+  annotations:
+    kagenti.io/description: "Code review agent (Anthropic SDK) supervised by OpenShell (PoC)"
+    openshell.kagenti.io/policy: claude-sdk-agent-policy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      kagenti.io/type: agent
+      app.kubernetes.io/name: claude-sdk-agent
+  template:
+    metadata:
+      labels:
+        kagenti.io/type: agent
+        protocol.kagenti.io/a2a: ""
+        kagenti.io/framework: AnthropicSDK
+        app.kubernetes.io/name: claude-sdk-agent
+    spec:
+      containers:
+      - name: agent
+        image: claude-sdk-agent:latest
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: AGENT_NAME
+          value: "claude-sdk-agent"
+        - name: PORT
+          value: "8080"
+        # Anthropic model name via LiteLLM's model routing
+        - name: ANTHROPIC_MODEL
+          value: "anthropic/claude-sonnet-4-20250514"
+        # Point the Anthropic SDK at the Budget Proxy's Anthropic pass-through
+        - name: ANTHROPIC_BASE_URL
+          value: "http://llm-budget-proxy.team1.svc:8080/anthropic/v1"
+        # Virtual key from the namespace secret
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: litellm-virtual-keys
+              key: api-key
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        readinessProbe:
+          tcpSocket:
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          failureThreshold: 12
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        volumeMounts:
+        - name: policy
+          mountPath: /etc/openshell
+          readOnly: true
+        - name: cache
+          mountPath: /app/.cache
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: policy
+        configMap:
+          name: claude-sdk-agent-policy
+      - name: cache
+        emptyDir: {}
+      - name: tmp
+        emptyDir: {}
+---
+# 3. Service — ClusterIP on port 8080
+apiVersion: v1
+kind: Service
+metadata:
+  name: claude-sdk-agent
+  namespace: team1
+  labels:
+    kagenti.io/type: agent
+    protocol.kagenti.io/a2a: ""
+    app.kubernetes.io/name: claude-sdk-agent
+    app.kubernetes.io/managed-by: openshell
+spec:
+  type: ClusterIP
+  selector:
+    kagenti.io/type: agent
+    app.kubernetes.io/name: claude-sdk-agent
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
+    protocol: TCP
+---
+# 4. AgentRuntime CR — declares this deployment as a Kagenti-managed agent
+#    Requires the agent.kagenti.dev CRD to be installed (kagenti-operator).
+apiVersion: agent.kagenti.dev/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: claude-sdk-agent
+  namespace: team1
+  labels:
+    app.kubernetes.io/name: claude-sdk-agent
+    app.kubernetes.io/managed-by: openshell
+spec:
+  type: agent
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: claude-sdk-agent
