@@ -95,6 +95,7 @@ while [[ $# -gt 0 ]]; do
         auth) ENV_FILES+=("$SCRIPT_DIR/../envs/dev_values_minimal_auth.yaml") ;;
         ocp) ENV_FILES+=("$SCRIPT_DIR/../envs/ocp_values.yaml") ;;
         ocp-minimal) ENV_FILES+=("$SCRIPT_DIR/../envs/ocp_minimal_values.yaml") ;;
+        openshell) ENV_FILES+=("$SCRIPT_DIR/../envs/dev_values_openshell.yaml") ;;
         *) echo "Unknown env: $1" >&2; exit 2 ;;
       esac
       shift
