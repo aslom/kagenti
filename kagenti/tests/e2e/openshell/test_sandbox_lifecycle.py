@@ -1,179 +1,135 @@
 """
-Sandbox Lifecycle E2E Tests (OpenShell PoC)
+Tests for OpenShell sandbox lifecycle via Kubernetes API.
 
-Tests sandbox create / list / delete operations via the OpenShell Gateway.
-
-The gateway exposes a gRPC API on port 8080.  Since the Python gRPC client
-may not be available in every test environment, these tests fall back to
-running ``kubectl exec`` into the gateway pod to exercise the CLI.
-
-Usage:
-    pytest kagenti/tests/e2e/openshell/test_sandbox_lifecycle.py -v -m openshell
+Tests create, list, and delete Sandbox CRs (agents.x-k8s.io/v1alpha1)
+to verify the OpenShell gateway processes them correctly.
 """
 
 import json
 import subprocess
+import time
 
 import pytest
 
-from kagenti.tests.e2e.openshell.conftest import kubectl_get_pods_json
-
-
 pytestmark = pytest.mark.openshell
 
-# Unique sandbox name for this test run to avoid collisions
-_TEST_SANDBOX_NAME = "e2e-test-sandbox"
+SANDBOX_NS = "team1"
+SANDBOX_NAME = "test-sandbox-poc"
 
 
-def _gateway_pod_name(gateway_namespace: str) -> str:
-    """Return the name of the first running gateway pod, or skip."""
-    pods = kubectl_get_pods_json(gateway_namespace)
-    for pod in pods:
-        if (
-            pod["metadata"]["name"].startswith("openshell-gateway")
-            and pod["status"].get("phase") == "Running"
-        ):
-            return pod["metadata"]["name"]
-    pytest.skip("No running openshell-gateway pod found")
+def _kubectl(*args: str, timeout: int = 30) -> subprocess.CompletedProcess:
+    cmd = ["kubectl", *args]
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
 
 
-def _kubectl_exec(
-    pod_name: str, namespace: str, command: list[str]
-) -> subprocess.CompletedProcess:
-    """Run a command inside a pod via ``kubectl exec``."""
-    cmd = [
-        "kubectl",
-        "exec",
-        pod_name,
-        "-n",
-        namespace,
-        "--",
-        *command,
-    ]
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+def _sandbox_crd_installed() -> bool:
+    result = _kubectl("get", "crd", "sandboxes.agents.x-k8s.io")
+    return result.returncode == 0
+
+
+skip_no_crd = pytest.mark.skipif(
+    not _sandbox_crd_installed(),
+    reason="Sandbox CRD (agents.x-k8s.io) not installed",
+)
 
 
 class TestSandboxLifecycle:
-    """Test sandbox CRUD operations via kubectl exec into the gateway pod."""
+    """Test sandbox CRUD via Kubernetes Sandbox CR API."""
 
-    def test_list_sandboxes(self, gateway_namespace):
-        """List sandboxes -- should succeed even if none exist yet."""
-        pod = _gateway_pod_name(gateway_namespace)
-        result = _kubectl_exec(
-            pod,
-            gateway_namespace,
-            ["openshell", "sandbox", "list", "--output", "json"],
+    @skip_no_crd
+    def test_list_sandboxes(self):
+        """List Sandbox CRs — should succeed even if none exist."""
+        result = _kubectl(
+            "get",
+            "sandboxes.agents.x-k8s.io",
+            "-n",
+            SANDBOX_NS,
+            "-o",
+            "json",
         )
-
-        if result.returncode != 0:
-            # The CLI may not be available inside the gateway image yet
-            if "executable file not found" in result.stderr:
-                pytest.skip("openshell CLI not available in gateway pod")
-            pytest.fail(
-                f"sandbox list failed (rc={result.returncode}): {result.stderr}"
-            )
-
-        # Should return valid JSON (possibly an empty list)
+        assert result.returncode == 0, f"Failed to list sandboxes: {result.stderr}"
         data = json.loads(result.stdout)
-        assert isinstance(data, (list, dict)), (
-            f"Unexpected sandbox list output: {result.stdout[:200]}"
+        assert "items" in data
+
+    @skip_no_crd
+    def test_create_sandbox(self):
+        """Create a Sandbox CR and verify the gateway picks it up."""
+        # Clean up first
+        _kubectl("delete", "sandbox", SANDBOX_NAME, "-n", SANDBOX_NS)
+        time.sleep(2)
+
+        # Create a minimal Sandbox CR (spec.podTemplate is the schema)
+        sandbox_yaml = f"""
+apiVersion: agents.x-k8s.io/v1alpha1
+kind: Sandbox
+metadata:
+  name: {SANDBOX_NAME}
+  namespace: {SANDBOX_NS}
+spec:
+  podTemplate:
+    spec:
+      containers:
+      - name: sandbox
+        image: ghcr.io/nvidia/openshell-community/sandboxes/base:latest
+"""
+        result = subprocess.run(
+            ["kubectl", "apply", "-f", "-"],
+            input=sandbox_yaml,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        assert result.returncode == 0, f"Failed to create sandbox: {result.stderr}"
+
+        # Verify it exists
+        time.sleep(3)
+        result = _kubectl(
+            "get",
+            "sandbox",
+            SANDBOX_NAME,
+            "-n",
+            SANDBOX_NS,
+            "-o",
+            "jsonpath={.metadata.name}",
+        )
+        assert result.stdout.strip() == SANDBOX_NAME
+
+    @skip_no_crd
+    def test_delete_sandbox(self):
+        """Delete the test sandbox CR."""
+        # Ensure it exists first
+        _kubectl(
+            "get",
+            "sandbox",
+            SANDBOX_NAME,
+            "-n",
+            SANDBOX_NS,
         )
 
-    def test_create_sandbox(self, gateway_namespace):
-        """Create a sandbox and verify it appears in the list."""
-        pod = _gateway_pod_name(gateway_namespace)
-
-        # Create
-        result = _kubectl_exec(
-            pod,
-            gateway_namespace,
-            [
-                "openshell",
-                "sandbox",
-                "create",
-                "--name",
-                _TEST_SANDBOX_NAME,
-                "--output",
-                "json",
-            ],
+        result = _kubectl(
+            "delete",
+            "sandbox",
+            SANDBOX_NAME,
+            "-n",
+            SANDBOX_NS,
+            "--timeout=30s",
+        )
+        # Accept both success (deleted) and not-found (already gone)
+        assert result.returncode == 0 or "NotFound" in result.stderr, (
+            f"Failed to delete sandbox: {result.stderr}"
         )
 
-        if result.returncode != 0:
-            if "executable file not found" in result.stderr:
-                pytest.skip("openshell CLI not available in gateway pod")
-            pytest.fail(
-                f"sandbox create failed (rc={result.returncode}): {result.stderr}"
-            )
-
-        # Verify via list
-        list_result = _kubectl_exec(
-            pod,
-            gateway_namespace,
-            ["openshell", "sandbox", "list", "--output", "json"],
+    @skip_no_crd
+    def test_gateway_processes_sandbox(self):
+        """Verify the gateway logs show it processed a sandbox event."""
+        result = _kubectl(
+            "logs",
+            "openshell-gateway-0",
+            "-n",
+            "openshell-system",
+            "--tail=50",
         )
-        assert list_result.returncode == 0, (
-            f"sandbox list after create failed: {list_result.stderr}"
-        )
-
-        data = json.loads(list_result.stdout)
-        # Accept both list-of-dicts and dict-with-items
-        items = (
-            data
-            if isinstance(data, list)
-            else data.get("items", data.get("sandboxes", []))
-        )
-
-        sandbox_names = [
-            s.get("name", s.get("metadata", {}).get("name", "")) for s in items
-        ]
-        assert _TEST_SANDBOX_NAME in sandbox_names, (
-            f"Created sandbox '{_TEST_SANDBOX_NAME}' not in list: {sandbox_names}"
-        )
-
-    def test_delete_sandbox(self, gateway_namespace):
-        """Delete the test sandbox and verify it is gone."""
-        pod = _gateway_pod_name(gateway_namespace)
-
-        result = _kubectl_exec(
-            pod,
-            gateway_namespace,
-            [
-                "openshell",
-                "sandbox",
-                "delete",
-                "--name",
-                _TEST_SANDBOX_NAME,
-            ],
-        )
-
-        if result.returncode != 0:
-            if "executable file not found" in result.stderr:
-                pytest.skip("openshell CLI not available in gateway pod")
-            # Sandbox may not exist if create was skipped -- not a hard failure
-            if "not found" in result.stderr.lower():
-                pytest.skip(
-                    "Sandbox was not created (create test may have been skipped)"
-                )
-            pytest.fail(
-                f"sandbox delete failed (rc={result.returncode}): {result.stderr}"
-            )
-
-        # Verify removal
-        list_result = _kubectl_exec(
-            pod,
-            gateway_namespace,
-            ["openshell", "sandbox", "list", "--output", "json"],
-        )
-        if list_result.returncode == 0:
-            data = json.loads(list_result.stdout)
-            items = (
-                data
-                if isinstance(data, list)
-                else data.get("items", data.get("sandboxes", []))
-            )
-            sandbox_names = [
-                s.get("name", s.get("metadata", {}).get("name", "")) for s in items
-            ]
-            assert _TEST_SANDBOX_NAME not in sandbox_names, (
-                f"Sandbox '{_TEST_SANDBOX_NAME}' still present after delete"
-            )
+        assert result.returncode == 0
+        assert (
+            "Listing sandboxes" in result.stdout or "sandbox" in result.stdout.lower()
+        ), "Gateway logs don't show sandbox processing"

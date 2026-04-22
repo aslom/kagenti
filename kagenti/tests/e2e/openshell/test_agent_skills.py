@@ -134,9 +134,8 @@ class TestADKAgentSkills:
             f"Response doesn't look like a code review: {text[:200]}"
         )
 
-    @skip_no_llm
     async def test_adk_agent_card(self, adk_agent_url):
-        """Verify ADK agent card is discoverable."""
+        """Verify ADK agent card is discoverable (no LLM needed)."""
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 f"{adk_agent_url}/.well-known/agent.json",

@@ -13,22 +13,30 @@ import json
 import os
 import uuid
 
-import anthropic
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 # ---------------------------------------------------------------------------
-# Anthropic client — honours ANTHROPIC_BASE_URL for Budget Proxy routing
+# LLM client — supports both Anthropic SDK and OpenAI-compatible endpoints.
+# When ANTHROPIC_BASE_URL points to a non-Anthropic endpoint (e.g., LiteMaaS),
+# we use httpx directly with OpenAI chat/completions format.
 # ---------------------------------------------------------------------------
-_base_url = os.environ.get("ANTHROPIC_BASE_URL")
-client = anthropic.Anthropic(
-    api_key=os.environ.get("ANTHROPIC_API_KEY", "dummy"),
-    base_url=_base_url if _base_url else anthropic.NOT_GIVEN,
-)
-
+_base_url = os.environ.get("ANTHROPIC_BASE_URL", "")
+_api_key = os.environ.get("ANTHROPIC_API_KEY", "dummy")
 _model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
+_use_openai_format = "anthropic.com" not in _base_url and _base_url != ""
+
+if _use_openai_format:
+    import httpx
+    _llm_client = httpx.Client(timeout=120.0)
+else:
+    import anthropic
+    _llm_client = anthropic.Anthropic(
+        api_key=_api_key,
+        base_url=_base_url if _base_url else anthropic.NOT_GIVEN,
+    )
 _port = int(os.environ.get("PORT", "8080"))
 
 # ---------------------------------------------------------------------------
@@ -84,20 +92,38 @@ async def handle_jsonrpc(request: Request) -> JSONResponse:
         p.get("text", "") for p in parts if p.get("type") == "text"
     )
 
-    # Call Claude via the Anthropic SDK
+    # Call LLM — Anthropic SDK or OpenAI-compatible format
+    system_prompt = (
+        "You are a thorough, constructive code reviewer. "
+        "Provide specific, actionable feedback on code quality, "
+        "security, performance, and best practices. "
+        "Be concise and focus on the most impactful observations."
+    )
     try:
-        response = client.messages.create(
-            model=_model,
-            max_tokens=1024,
-            system=(
-                "You are a thorough, constructive code reviewer. "
-                "Provide specific, actionable feedback on code quality, "
-                "security, performance, and best practices. "
-                "Be concise and focus on the most impactful observations."
-            ),
-            messages=[{"role": "user", "content": text}],
-        )
-        reply_text = response.content[0].text
+        if _use_openai_format:
+            resp = _llm_client.post(
+                f"{_base_url}/chat/completions",
+                headers={"Authorization": f"Bearer {_api_key}"},
+                json={
+                    "model": _model,
+                    "max_tokens": 1024,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": text},
+                    ],
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            reply_text = data["choices"][0]["message"]["content"]
+        else:
+            response = _llm_client.messages.create(
+                model=_model,
+                max_tokens=1024,
+                system=system_prompt,
+                messages=[{"role": "user", "content": text}],
+            )
+            reply_text = response.content[0].text
     except Exception as e:
         reply_text = f"Error calling Claude: {e}"
 

@@ -71,7 +71,10 @@ class TestKagentiOperator:
             p
             for p in pods
             if "kagenti" in p["metadata"]["name"]
-            and "operator" in p["metadata"]["name"]
+            and (
+                "operator" in p["metadata"]["name"]
+                or "controller-manager" in p["metadata"]["name"]
+            )
         ]
 
         if not operator_pods:
