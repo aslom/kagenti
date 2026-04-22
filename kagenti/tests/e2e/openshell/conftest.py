@@ -69,27 +69,61 @@ def llm_available():
 # ---------------------------------------------------------------------------
 
 
-def _agent_url(name: str, namespace: str, port: int) -> str:
-    """Build the in-cluster A2A endpoint URL for an agent."""
-    return f"http://{name}.{namespace}.svc.cluster.local:{port}"
+def _find_free_port() -> int:
+    """Find a free local port for port-forwarding."""
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("", 0))
+        return s.getsockname()[1]
+
+
+def _port_forward(name: str, namespace: str, remote_port: int):
+    """Start kubectl port-forward and return (local_url, process)."""
+    local_port = _find_free_port()
+    proc = subprocess.Popen(
+        [
+            "kubectl",
+            "port-forward",
+            f"svc/{name}",
+            f"{local_port}:{remote_port}",
+            "-n",
+            namespace,
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    import time
+
+    time.sleep(2)
+    return f"http://localhost:{local_port}", proc
 
 
 @pytest.fixture(scope="session")
 def weather_agent_url(agent_namespace, agent_port):
-    """Full A2A URL for the weather agent."""
-    return _agent_url("weather-agent", agent_namespace, agent_port)
+    """Port-forward to weather agent and return local URL."""
+    url, proc = _port_forward("weather-agent", agent_namespace, agent_port)
+    yield url
+    proc.terminate()
+    proc.wait()
 
 
 @pytest.fixture(scope="session")
 def adk_agent_url(agent_namespace, agent_port):
-    """Full A2A URL for the ADK agent."""
-    return _agent_url("adk-agent", agent_namespace, agent_port)
+    """Port-forward to ADK agent and return local URL."""
+    url, proc = _port_forward("adk-agent", agent_namespace, agent_port)
+    yield url
+    proc.terminate()
+    proc.wait()
 
 
 @pytest.fixture(scope="session")
 def claude_sdk_agent_url(agent_namespace, agent_port):
-    """Full A2A URL for the Claude SDK agent."""
-    return _agent_url("claude-sdk-agent", agent_namespace, agent_port)
+    """Port-forward to Claude SDK agent and return local URL."""
+    url, proc = _port_forward("claude-sdk-agent", agent_namespace, agent_port)
+    yield url
+    proc.terminate()
+    proc.wait()
 
 
 # ---------------------------------------------------------------------------
@@ -124,6 +158,7 @@ async def a2a_send(
         "params": {
             "message": {
                 "role": "user",
+                "messageId": f"msg-{request_id}",
                 "parts": [{"type": "text", "text": text}],
             }
         },
@@ -142,17 +177,17 @@ def extract_a2a_text(response: dict) -> str:
     result = response.get("result", {})
     texts: list[str] = []
 
-    # Artifacts
+    # Artifacts — handle both "type" and "kind" field names (A2A spec variants)
     for artifact in result.get("artifacts", []):
         for part in artifact.get("parts", []):
-            if part.get("type") == "text":
-                texts.append(part["text"])
+            if part.get("type") == "text" or part.get("kind") == "text":
+                texts.append(part.get("text", ""))
 
     # Status message fallback
     status_msg = result.get("status", {}).get("message", {})
     for part in status_msg.get("parts", []):
-        if part.get("type") == "text":
-            texts.append(part["text"])
+        if part.get("type") == "text" or part.get("kind") == "text":
+            texts.append(part.get("text", ""))
 
     return "\n".join(texts)
 
