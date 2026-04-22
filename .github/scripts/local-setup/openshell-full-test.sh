@@ -242,17 +242,45 @@ kubectl get pods -n openshell-system
 # PHASE 4: Deploy Agents
 # ============================================================================
 if [ "$SKIP_AGENTS" = "false" ]; then
-    log_phase "PHASE 4: Deploy Agents"
+    log_phase "PHASE 4: Build & Deploy Agents"
 
     # Ensure team1 namespace exists
     kubectl get ns team1 >/dev/null 2>&1 || kubectl create ns team1
 
-    # Create placeholder LLM secret if not exists
-    kubectl get secret litellm-virtual-keys -n team1 >/dev/null 2>&1 || {
+    # Create LLM secret from .env.maas if available, otherwise placeholder
+    if kubectl get secret litellm-virtual-keys -n team1 >/dev/null 2>&1; then
+        log_step "LLM secret already exists."
+    elif [ -f "$REPO_ROOT/.env.maas" ]; then
+        log_step "Creating LLM secret from .env.maas..."
+        # shellcheck source=/dev/null
+        source "$REPO_ROOT/.env.maas"
+        kubectl create secret generic litellm-virtual-keys -n team1 \
+            --from-literal=api-key="${MAAS_LLAMA4_API_KEY:-sk-poc-placeholder}"
+    else
         log_step "Creating placeholder LLM secret..."
         kubectl create secret generic litellm-virtual-keys -n team1 \
             --from-literal=api-key=sk-poc-placeholder
-    }
+    fi
+
+    # Create skills ConfigMap if not exists
+    if kubectl get configmap kagenti-skills -n team1 >/dev/null 2>&1; then
+        log_step "Skills ConfigMap already exists."
+    else
+        log_step "Creating kagenti-skills ConfigMap..."
+        kubectl create configmap kagenti-skills -n team1 \
+            --from-literal=skills.json='{"version":"1.0","source":"kagenti/.claude/skills/","skills":[{"name":"review","type":"claude-code-skill"},{"name":"rca","type":"claude-code-skill"},{"name":"k8s:health","type":"claude-code-skill"},{"name":"k8s:pods","type":"claude-code-skill"},{"name":"k8s:logs","type":"claude-code-skill"},{"name":"tdd:kind","type":"claude-code-skill"},{"name":"tdd:hypershift","type":"claude-code-skill"},{"name":"github:pr-review","type":"claude-code-skill"},{"name":"security-review","type":"claude-code-skill"}]}'
+    fi
+
+    # Set webhook to Ignore on failure (PoC: agents deploy without AuthBridge)
+    kubectl get mutatingwebhookconfiguration -o name 2>/dev/null | grep kagenti | while read -r webhook; do
+        kubectl patch "$webhook" --type='json' \
+            -p='[{"op":"replace","path":"/webhooks/0/failurePolicy","value":"Ignore"}]' 2>/dev/null || true
+    done
+
+    # Build custom agent images (idempotent — skips existing)
+    log_step "Building agent images..."
+    PLATFORM="$PLATFORM" CLUSTER_NAME="$CLUSTER_NAME" \
+        ./.github/scripts/local-setup/openshell-build-agents.sh
 
     # Apply agent manifests
     AGENTS_DIR="deployments/openshell/agents"
@@ -263,8 +291,8 @@ if [ "$SKIP_AGENTS" = "false" ]; then
             kubectl apply -f "$manifest" 2>&1 | grep -v "ensure CRDs" || true
         done
 
-        log_step "Waiting for agent pods to be ready (up to 120s)..."
-        kubectl wait --for=condition=ready pod -l kagenti.io/type=agent -n team1 --timeout=120s 2>/dev/null || {
+        log_step "Waiting for agent pods to be ready (up to 180s)..."
+        kubectl wait --for=condition=ready pod -l kagenti.io/type=agent -n team1 --timeout=180s 2>/dev/null || {
             log_warn "Some agent pods not ready. Checking status..."
         }
         kubectl get pods -n team1 -l kagenti.io/type=agent
@@ -288,6 +316,12 @@ if [ "$SKIP_TEST" = "false" ]; then
     ./.github/scripts/common/87-setup-test-credentials.sh 2>/dev/null || true
 
     export KAGENTI_CONFIG_FILE="deployments/envs/dev_values_openshell.yaml"
+
+    # Enable LLM tests if .env.maas is available
+    if [ -f "$REPO_ROOT/.env.maas" ]; then
+        export OPENSHELL_LLM_AVAILABLE=true
+        log_step "LiteMaaS available — LLM tests enabled"
+    fi
 
     TEST_DIR="kagenti/tests/e2e/openshell"
     if [ -d "$TEST_DIR" ]; then

@@ -18,7 +18,7 @@ from kagenti.tests.e2e.openshell.conftest import kubectl_get_pods_json
 
 pytestmark = pytest.mark.openshell
 
-_AGENTS = ["weather-agent", "adk-agent", "claude-sdk-agent"]
+_AGENTS = ["weather-agent", "adk-agent", "claude-sdk-agent", "weather-agent-supervised"]
 
 # Agents that use LLM and have API key secrets
 _LLM_AGENTS = ["adk-agent", "claude-sdk-agent"]

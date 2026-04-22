@@ -1,0 +1,86 @@
+# Weather agent with OpenShell supervisor as entrypoint
+# The supervisor applies Landlock + seccomp before exec'ing the weather app
+#
+# ConfigMap is created separately by the fulltest script from:
+#   policy-data.yaml (sandbox config)
+#   sandbox-policy.rego (OPA rules from upstream OpenShell)
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: weather-agent-supervised
+  namespace: team1
+  labels:
+    kagenti.io/type: agent
+    app.kubernetes.io/name: weather-agent-supervised
+    app.kubernetes.io/managed-by: openshell
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: weather-agent-supervised
+  template:
+    metadata:
+      labels:
+        kagenti.io/type: agent
+        app.kubernetes.io/name: weather-agent-supervised
+    spec:
+      containers:
+      - name: agent
+        image: weather-agent-supervised:latest
+        imagePullPolicy: IfNotPresent
+        command: ["/usr/local/bin/openshell-sandbox"]
+        args:
+        - "--policy-rules"
+        - "/etc/openshell/sandbox-policy.rego"
+        - "--policy-data"
+        - "/etc/openshell/policy.yaml"
+        - "--log-level"
+        - "info"
+        - "--"
+        - "/bin/bash"
+        - "-c"
+        - "exec /app/.venv/bin/python3 -c 'from weather_service.agent import run; run()'"
+        securityContext:
+          privileged: true
+        env:
+        - name: AGENT_NAME
+          value: "weather-agent-supervised"
+        - name: PORT
+          value: "8080"
+        - name: HOST
+          value: "0.0.0.0"
+        - name: UV_CACHE_DIR
+          value: "/tmp/uv-cache"
+        - name: HOME
+          value: "/tmp/home"
+        ports:
+        - containerPort: 8080
+        volumeMounts:
+        - name: policy
+          mountPath: /etc/openshell
+          readOnly: true
+        - name: cache
+          mountPath: /.cache
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: policy
+        configMap:
+          name: weather-agent-supervised-policy
+      - name: cache
+        emptyDir: {}
+      - name: tmp
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: weather-agent-supervised
+  namespace: team1
+spec:
+  selector:
+    app.kubernetes.io/name: weather-agent-supervised
+  ports:
+  - port: 8080
+    targetPort: 8080

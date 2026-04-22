@@ -94,7 +94,12 @@ class TestKagentiOperator:
 class TestAgentPods:
     """Verify all OpenShell PoC agent pods are Running in the agent namespace."""
 
-    EXPECTED_AGENTS = ["weather-agent", "adk-agent", "claude-sdk-agent"]
+    EXPECTED_AGENTS = [
+        "weather-agent",
+        "adk-agent",
+        "claude-sdk-agent",
+        "weather-agent-supervised",
+    ]
 
     def test_all_agent_pods_exist(self, agent_namespace):
         """Each expected agent must have at least one pod."""
