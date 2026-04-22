@@ -69,7 +69,89 @@ graph TB
 | Budget Proxy | `team1` | LLM token budget enforcement |
 | PostgreSQL | `team1` | Sessions + budget databases |
 
-## 3. Supervisor as Container Entrypoint
+## 3. Two Agent Deployment Modes
+
+Kagenti supports two agent deployment modes that coexist:
+
+### Mode 1: Custom Agents (Kagenti-managed)
+
+Custom A2A agents deployed as K8s Deployments. Used for production agents
+with custom code, frameworks (LangGraph, ADK), and A2A protocol.
+
+```mermaid
+graph LR
+    Wizard["Wizard / kubectl"] -->|"creates"| Dep["Deployment + Service"]
+    Dep --> Pod1["Agent Pod<br/>(custom image)"]
+    OP1["Kagenti Operator"] -->|"AgentRuntime CR"| Pod1
+```
+
+- **Image:** Custom Dockerfile per agent
+- **Interaction:** A2A JSON-RPC 2.0 (programmatic)
+- **Lifecycle:** Long-running Deployment
+- **Examples:** Weather agent, ADK agent, Claude SDK agent
+
+### Mode 2: Built-in Sandboxes (OpenShell-managed)
+
+Pre-installed CLI agents created via OpenShell gateway. The base sandbox
+image (`ghcr.io/nvidia/openshell-community/sandboxes/base:latest`, ~620MB)
+includes Claude CLI, OpenCode, Codex, Copilot, Python, Node.js, git.
+
+```mermaid
+graph LR
+    CLI2["openshell sandbox create<br/>-- claude"] -->|"gRPC"| GW2["Gateway"]
+    GW2 -->|"K8s driver"| Pod2["Sandbox Pod<br/>(base image + supervisor)"]
+    Pod2 --> Agent2["claude CLI<br/>(pre-installed)"]
+```
+
+- **Image:** `ghcr.io/nvidia/openshell-community/sandboxes/base:latest` (all CLIs pre-installed)
+- **Interaction:** SSH exec (interactive terminal) or `openshell sandbox exec`
+- **Lifecycle:** Ephemeral sandbox (TTL, on-demand create/destroy)
+- **CRD:** Sandbox CR (`agents.x-k8s.io`)
+
+### Pre-installed CLIs in Base Image
+
+| CLI | LLM Protocol | Works with LiteLLM? | Required Key |
+|-----|-------------|---------------------|-------------|
+| **claude** | Anthropic `/v1/messages` | Yes (inference router) | Anthropic or LiteLLM virtual key |
+| **opencode** | OpenAI `/v1/chat/completions` | Yes (native format) | OpenAI-compatible key |
+| **codex** | OpenAI-specific | Partial | OpenAI API key |
+| **copilot** | GitHub Copilot API | No (proprietary) | GitHub Copilot subscription |
+
+### Architecture with Both Modes
+
+```mermaid
+graph TB
+    subgraph openshell_ns2["openshell-system"]
+        GW3["OpenShell Gateway"]
+        KD3["K8s Compute Driver"]
+    end
+
+    subgraph kagenti_ns2["kagenti-system"]
+        OP3["Kagenti Operator"]
+    end
+
+    subgraph agent_ns2["team1"]
+        subgraph custom["Custom Agents (Mode 1)"]
+            W["Weather Agent<br/>(Deployment)"]
+            ADK3["ADK Agent<br/>(Deployment)"]
+        end
+        subgraph builtin["Built-in Sandboxes (Mode 2)"]
+            CS["Claude Sandbox<br/>(Sandbox CR)"]
+            OC["OpenCode Sandbox<br/>(Sandbox CR)"]
+        end
+    end
+
+    OP3 -->|"AgentRuntime CR"| custom
+    GW3 -->|"Sandbox CR"| builtin
+    KD3 -->|"creates pods"| builtin
+```
+
+Both modes share the same namespace, Budget Proxy, PostgreSQL, and Istio mesh.
+Custom agents use A2A protocol; built-in sandboxes use SSH/exec.
+
+---
+
+## 5. Supervisor as Container Entrypoint
 
 Each agent pod uses the OpenShell supervisor as the container entrypoint:
 
@@ -83,7 +165,7 @@ Each agent pod uses the OpenShell supervisor as the container entrypoint:
 The agent inherits kernel-enforced isolation for its entire lifetime. Normal pod
 networking is preserved (no network namespace in PoC), so Istio mesh works unchanged.
 
-## 4. Credential Isolation
+## 6. Credential Isolation
 
 OpenShell implements zero-secret credential isolation. Agent env vars contain
 **placeholder tokens** (`openshell:resolve:env:API_KEY`), not real secrets. The
@@ -93,7 +175,7 @@ via TLS termination before forwarding upstream.
 For LLM calls, the supervisor's inference router strips agent-supplied auth
 headers entirely and injects backend API keys from the gateway's credential store.
 
-## 5. Target Architecture (Phase 2)
+## 7. Target Architecture (Phase 2)
 
 Phase 2 introduces Kagenti as an OpenShell compute driver, implementing the
 `ComputeDriver` gRPC interface ([PR #817](https://github.com/NVIDIA/OpenShell/pull/817),
@@ -114,7 +196,7 @@ graph TB
     end
 ```
 
-## 6. OpenShell RFC 0001
+## 8. OpenShell RFC 0001
 
 OpenShell is being rearchitected via [RFC 0001](https://github.com/NVIDIA/OpenShell/pull/836)
 into a composable, driver-based system with four pluggable subsystems:
@@ -126,7 +208,7 @@ into a composable, driver-based system with four pluggable subsystems:
 | **Control-plane identity** | User/operator auth (mTLS, OIDC) | Keycloak OIDC |
 | **Sandbox identity** | Workload identity (SPIFFE) | SPIRE |
 
-## 7. Related PRs
+## 9. Related PRs
 
 Key upstream PRs relevant to integration:
 
