@@ -105,7 +105,7 @@ spec:
           mountPath: /etc/openshell
           readOnly: true
         - name: cache
-          mountPath: /app/.cache
+          mountPath: /.cache
         - name: tmp
           mountPath: /tmp
       volumes:
