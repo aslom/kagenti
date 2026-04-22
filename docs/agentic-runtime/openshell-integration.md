@@ -245,7 +245,27 @@ the isolation. This eliminates the privileged window.
 **Requires:** Upstream OpenShell support for `--setup-only` mode (supervisor
 sets up isolation and exits, leaving the netns/Landlock for the next container).
 
-## 10. TODO: Production Readiness
+## 10. LLM Compatibility Matrix
+
+| Agent / CLI | LiteMaaS (llama-scout, deepseek) | Anthropic API | OpenAI API |
+|-------------|----------------------------------|---------------|------------|
+| **Claude CLI** (base image) | **No** — validates model name against Anthropic API | **Yes** (native) | No |
+| **Claude SDK agent** (custom) | **Yes** — uses httpx with OpenAI-compatible format | Yes (native SDK) | Yes (via format switch) |
+| **ADK agent** (Google ADK) | **Yes** — uses OpenAI-compatible format via LiteLLM | N/A | Yes |
+| **OpenCode** (base image) | **Yes** — uses OpenAI-compatible format | N/A | Yes |
+| **Codex** (base image) | Partial — may need real OpenAI key | N/A | Yes |
+| **Copilot** (base image) | No — proprietary GitHub API | N/A | N/A |
+
+**Key limitation:** Claude CLI requires a real Anthropic API key. It cannot
+use LiteMaaS or other OpenAI-compatible endpoints because it validates the
+model name against Anthropic's model catalog. For skill execution tests
+(`claude /review`, `claude /rca:kind`), a real Anthropic API key is required.
+
+Our custom Claude SDK agent works with LiteMaaS because it uses httpx
+directly with the OpenAI chat/completions format, bypassing Claude CLI's
+model validation.
+
+## 11. TODO: Production Readiness
 
 | Item | Priority | Description |
 |------|----------|-------------|
