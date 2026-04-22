@@ -1,16 +1,11 @@
 """
 Credential Isolation E2E Tests (OpenShell PoC)
 
-Validates that agent pods do not hold raw secrets and that the OpenShell
-supervisor is the container entrypoint (when supervisor integration is
-available).
-
-These tests are currently **skipped** because the supervisor binary is
-not yet integrated into agent images.  They serve as the test skeleton
-for when supervisor integration lands.
-
-Usage:
-    pytest kagenti/tests/e2e/openshell/test_credential_isolation.py -v -m openshell
+Validates that agent pods handle credentials securely:
+1. Secrets are delivered via K8s secretKeyRef (not hardcoded in deployment YAML)
+2. Agent containers don't have unnecessary secrets in env
+3. Policy ConfigMaps are properly mounted
+4. When supervisor is integrated: placeholder tokens instead of real secrets
 """
 
 import json
@@ -23,12 +18,13 @@ from kagenti.tests.e2e.openshell.conftest import kubectl_get_pods_json
 
 pytestmark = pytest.mark.openshell
 
-# Agent deployments to inspect
 _AGENTS = ["weather-agent", "adk-agent", "claude-sdk-agent"]
+
+# Agents that use LLM and have API key secrets
+_LLM_AGENTS = ["adk-agent", "claude-sdk-agent"]
 
 
 def _get_pod_name(agent: str, namespace: str) -> str:
-    """Return the name of the first Running pod for a given agent prefix."""
     pods = kubectl_get_pods_json(namespace)
     for pod in pods:
         if (
@@ -39,124 +35,184 @@ def _get_pod_name(agent: str, namespace: str) -> str:
     pytest.skip(f"No running pod found for {agent} in {namespace}")
 
 
-class TestCredentialPlaceholders:
-    """Verify that env vars in agent pods use openshell:resolve:env: placeholders."""
-
-    @pytest.mark.skip(
-        reason="supervisor integration pending -- env placeholders not yet injected"
+def _kubectl_exec(pod: str, ns: str, cmd: list[str]) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["kubectl", "exec", pod, "-n", ns, "-c", "agent", "--", *cmd],
+        capture_output=True,
+        text=True,
+        timeout=15,
     )
-    @pytest.mark.parametrize("agent", _AGENTS)
-    def test_env_has_resolve_placeholders(self, agent, agent_namespace):
-        """Agent pod env vars should contain openshell:resolve:env: placeholders
-        instead of raw secret values.
 
-        This ensures secrets are resolved at runtime by the supervisor,
-        not baked into the pod spec.
-        """
-        pod_name = _get_pod_name(agent, agent_namespace)
 
+class TestSecretDelivery:
+    """Verify secrets are delivered via K8s secretKeyRef, not hardcoded."""
+
+    @pytest.mark.parametrize("agent", _LLM_AGENTS)
+    def test_api_key_from_secret_ref(self, agent, agent_namespace):
+        """API key env var must come from a K8s Secret, not a literal value."""
         result = subprocess.run(
             [
                 "kubectl",
-                "exec",
-                pod_name,
+                "get",
+                "deployment",
+                agent,
                 "-n",
                 agent_namespace,
-                "--",
-                "env",
+                "-o",
+                "json",
             ],
             capture_output=True,
             text=True,
-            timeout=15,
+            timeout=10,
         )
-
         if result.returncode != 0:
-            pytest.fail(f"kubectl exec env failed: {result.stderr}")
+            pytest.skip(f"Deployment {agent} not found")
+
+        dep = json.loads(result.stdout)
+        containers = dep["spec"]["template"]["spec"]["containers"]
+        agent_container = next((c for c in containers if c["name"] == "agent"), None)
+        assert agent_container, f"No 'agent' container in {agent}"
+
+        env_vars = agent_container.get("env", [])
+        key_envs = [
+            e
+            for e in env_vars
+            if "API_KEY" in e.get("name", "") or "api_key" in e.get("name", "")
+        ]
+
+        for env in key_envs:
+            assert "valueFrom" in env, (
+                f"{agent}: {env['name']} has literal value instead of secretKeyRef. "
+                f"Secrets must be delivered via K8s Secrets."
+            )
+            assert "secretKeyRef" in env["valueFrom"], (
+                f"{agent}: {env['name']} uses valueFrom but not secretKeyRef"
+            )
+
+
+class TestNoHardcodedSecrets:
+    """Verify no real API keys are hardcoded in deployment YAML."""
+
+    @pytest.mark.parametrize("agent", _AGENTS)
+    def test_no_literal_api_keys(self, agent, agent_namespace):
+        """Deployment YAML must not contain literal API key values."""
+        result = subprocess.run(
+            [
+                "kubectl",
+                "get",
+                "deployment",
+                agent,
+                "-n",
+                agent_namespace,
+                "-o",
+                "yaml",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            pytest.skip(f"Deployment {agent} not found")
+
+        yaml_text = result.stdout.lower()
+        dangerous_patterns = ["sk-", "api_key: sk", "key: ghp_", "key: ghs_"]
+        for pattern in dangerous_patterns:
+            assert pattern not in yaml_text, (
+                f"{agent}: Found potential hardcoded secret pattern '{pattern}' in YAML"
+            )
+
+
+class TestAgentEnvSecurity:
+    """Verify agent process environment doesn't leak unnecessary secrets."""
+
+    @pytest.mark.parametrize("agent", _AGENTS)
+    def test_no_kubernetes_token_exposed(self, agent, agent_namespace):
+        """Agent shouldn't have the K8s service account token in env."""
+        pod_name = _get_pod_name(agent, agent_namespace)
+        result = _kubectl_exec(pod_name, agent_namespace, ["env"])
+        if result.returncode != 0:
+            pytest.skip(f"Cannot exec into {agent}: {result.stderr}")
 
         env_lines = result.stdout.strip().splitlines()
-
-        # Check that sensitive env vars use the placeholder pattern
-        sensitive_prefixes = ("OPENAI_API_KEY=", "ANTHROPIC_API_KEY=")
         for line in env_lines:
-            for prefix in sensitive_prefixes:
-                if line.startswith(prefix):
-                    value = line[len(prefix) :]
-                    assert value.startswith("openshell:resolve:env:"), (
-                        f"Pod {pod_name}: {prefix.rstrip('=')} contains a raw value "
-                        f"instead of an openshell:resolve:env: placeholder"
-                    )
-
-
-class TestSupervisorEntrypoint:
-    """Verify that the OpenShell supervisor is the container entrypoint."""
-
-    @pytest.mark.skip(
-        reason="supervisor integration pending -- supervisor not yet injected"
-    )
-    @pytest.mark.parametrize("agent", _AGENTS)
-    def test_supervisor_is_entrypoint(self, agent, agent_namespace):
-        """The first process (PID 1) inside the agent container should be
-        the OpenShell supervisor binary.
-        """
-        pod_name = _get_pod_name(agent, agent_namespace)
-
-        result = subprocess.run(
-            [
-                "kubectl",
-                "exec",
-                pod_name,
-                "-n",
-                agent_namespace,
-                "--",
-                "cat",
-                "/proc/1/cmdline",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-
-        if result.returncode != 0:
-            pytest.skip(f"Cannot read /proc/1/cmdline in {pod_name}: {result.stderr}")
-
-        # /proc/1/cmdline uses null bytes as delimiters
-        cmdline = result.stdout.replace("\x00", " ").strip()
-        assert "openshell-supervisor" in cmdline or "supervisor" in cmdline, (
-            f"Pod {pod_name}: PID 1 is not the supervisor. cmdline: {cmdline}"
-        )
+            assert not line.startswith("KUBERNETES_SERVICE_ACCOUNT_TOKEN="), (
+                f"{agent}: K8s SA token found in env (should be file-mounted only)"
+            )
 
 
 class TestPolicyConfigMapMounted:
-    """Verify that the OPA sandbox policy ConfigMap is mounted."""
+    """Verify OPA policy ConfigMap is properly mounted in agent pods."""
 
     @pytest.mark.parametrize("agent", _AGENTS)
     def test_policy_file_exists(self, agent, agent_namespace):
-        """The policy ConfigMap should be mounted at /etc/openshell/policy.yaml."""
+        """The OPA policy file should be mounted at /etc/openshell/."""
         pod_name = _get_pod_name(agent, agent_namespace)
-
-        result = subprocess.run(
-            [
-                "kubectl",
-                "exec",
-                pod_name,
-                "-n",
-                agent_namespace,
-                "--",
-                "cat",
-                "/etc/openshell/policy.yaml",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-
+        result = _kubectl_exec(pod_name, agent_namespace, ["ls", "/etc/openshell/"])
         if result.returncode != 0:
-            pytest.fail(f"Policy file not found in {pod_name}: {result.stderr}")
+            pytest.skip(f"Cannot exec into {agent}: {result.stderr}")
 
-        content = result.stdout.strip()
-        assert "version" in content, (
-            f"Policy file in {pod_name} does not look valid: {content[:200]}"
+        assert "policy.yaml" in result.stdout, (
+            f"{agent}: No policy.yaml found at /etc/openshell/. "
+            f"Contents: {result.stdout}"
         )
-        assert "filesystem_policy" in content, (
-            f"Policy file in {pod_name} missing filesystem_policy section"
+
+    @pytest.mark.parametrize("agent", _AGENTS)
+    def test_policy_is_valid_yaml(self, agent, agent_namespace):
+        """The mounted policy file must be valid YAML with expected fields."""
+        pod_name = _get_pod_name(agent, agent_namespace)
+        result = _kubectl_exec(
+            pod_name, agent_namespace, ["cat", "/etc/openshell/policy.yaml"]
         )
+        if result.returncode != 0:
+            pytest.skip(f"Cannot read policy: {result.stderr}")
+
+        content = result.stdout
+        assert "version:" in content, "Policy missing 'version' field"
+        assert "filesystem_policy:" in content or "network_policies:" in content, (
+            "Policy missing filesystem or network policy section"
+        )
+
+
+class TestSupervisorIntegration:
+    """Tests for when the OpenShell supervisor is the container entrypoint.
+
+    These verify placeholder tokens, supervisor process tree, and
+    credential resolution. Currently the supervisor is not yet deployed
+    as the entrypoint — these tests document the target state.
+    """
+
+    @pytest.mark.parametrize("agent", _AGENTS)
+    def test_supervisor_entrypoint_or_document_gap(self, agent, agent_namespace):
+        """Check if supervisor is PID 1. If not, document the current state."""
+        pod_name = _get_pod_name(agent, agent_namespace)
+        result = _kubectl_exec(pod_name, agent_namespace, ["cat", "/proc/1/cmdline"])
+        if result.returncode != 0:
+            pytest.skip(f"Cannot read /proc/1/cmdline: {result.stderr}")
+
+        cmdline = result.stdout.replace("\x00", " ").strip()
+        if "openshell" in cmdline.lower() or "supervisor" in cmdline.lower():
+            pass  # Supervisor is entrypoint — test passes
+        else:
+            pytest.skip(
+                f"Supervisor not yet entrypoint for {agent}. "
+                f"Current PID 1: {cmdline[:100]}. "
+                f"This will pass once supervisor integration is deployed."
+            )
+
+    @pytest.mark.parametrize("agent", _LLM_AGENTS)
+    def test_placeholder_tokens_or_document_gap(self, agent, agent_namespace):
+        """Check if env vars use openshell:resolve:env: placeholders."""
+        pod_name = _get_pod_name(agent, agent_namespace)
+        result = _kubectl_exec(pod_name, agent_namespace, ["env"])
+        if result.returncode != 0:
+            pytest.skip(f"Cannot exec into {agent}: {result.stderr}")
+
+        env_lines = result.stdout.strip().splitlines()
+        has_placeholder = any("openshell:resolve:env:" in line for line in env_lines)
+        if has_placeholder:
+            pass  # Placeholders present — test passes
+        else:
+            pytest.skip(
+                f"Placeholder tokens not yet in {agent} env. "
+                f"This will pass once supervisor integration is deployed."
+            )

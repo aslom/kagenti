@@ -201,43 +201,4 @@ class TestClaudeSDKAgentSkills:
             f"Response doesn't contain a function: {text[:200]}"
         )
 
-
-class TestSkillDiscovery:
-    """Test that agents can discover and reference kagenti skills.
-
-    These tests verify the agent can be pointed at the kagenti repo's
-    .claude/skills/ directory and understand available skills like
-    review, rca, tdd, etc.
-
-    TODO: Implement once agents can clone repos or access skill files.
-    Currently agents run in isolated pods without repo access.
-    """
-
-    @pytest.mark.skip(
-        reason="TODO: Agent repo access not configured. "
-        "Need to mount kagenti repo or provide skill manifests via ConfigMap. "
-        "Skills available in .claude/skills/: review, rca, tdd:kind, "
-        "tdd:hypershift, k8s:health, k8s:pods, k8s:logs, "
-        "github:pr-review, security-review"
-    )
-    def test_skill_listing(self):
-        """Verify agent can discover available kagenti skills."""
-        pass
-
-    @pytest.mark.skip(
-        reason="TODO: PR review skill requires repo access + LLM. "
-        "The kagenti repo has .claude/skills/review and "
-        ".claude/skills/github:pr-review skills that can analyze diffs."
-    )
-    def test_pr_review_with_kagenti_skill(self):
-        """Use kagenti's review skill to analyze a PR."""
-        pass
-
-    @pytest.mark.skip(
-        reason="TODO: RCA skill requires cluster access + LLM. "
-        "The kagenti repo has .claude/skills/rca:kind and "
-        ".claude/skills/rca:hypershift skills for root cause analysis."
-    )
-    def test_rca_skill(self):
-        """Use kagenti's RCA skill to diagnose a simulated failure."""
-        pass
+    # Skill discovery tests moved to test_skill_discovery.py
