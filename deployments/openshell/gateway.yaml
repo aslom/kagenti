@@ -1,5 +1,5 @@
 # OpenShell Gateway
-# Runs the openshell-server binary which includes the K8s Compute Driver
+# Runs the openshell-gateway binary which includes the K8s Compute Driver
 # in-process (merged upstream in PR #839).
 #
 # PoC mode: --disable-tls --disable-gateway-auth
@@ -38,11 +38,14 @@ spec:
       - name: gateway
         image: ghcr.io/nvidia/openshell/gateway:latest
         args:
-        - openshell-server
+        - --db-url
+        - sqlite:///var/openshell/openshell.db
         - --sandbox-namespace
         - team1
         - --disable-tls
         - --disable-gateway-auth
+        - --ssh-handshake-secret
+        - openshell-ssh-handshake
         ports:
         - name: grpc-http
           containerPort: 8080

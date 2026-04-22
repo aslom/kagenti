@@ -76,14 +76,38 @@ rules:
   - update
   - patch
   - delete
-# Events for status reporting
+# Events for status reporting and watching
 - apiGroups:
   - ""
   resources:
   - events
   verbs:
+  - get
+  - list
+  - watch
   - create
   - patch
+# Services for sandbox networking
+- apiGroups:
+  - ""
+  resources:
+  - services
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - delete
+# Namespaces (read-only)
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - get
+  - list
+  - watch
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
