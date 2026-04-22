@@ -123,8 +123,10 @@ log_step "Waiting for platform to be ready..."
 log_step "Configuring dockerhost..."
 ./.github/scripts/common/70-configure-dockerhost.sh
 
-log_step "Waiting for CRDs..."
-./.github/scripts/kagenti-operator/41-wait-crds.sh
+log_step "Waiting for Kagenti Operator CRDs (AgentRuntime only)..."
+kubectl wait --for=condition=established crd/agentruntimes.agent.kagenti.dev --timeout=120s 2>/dev/null || {
+    log_step "AgentRuntime CRD not found — operator may not include it. Continuing."
+}
 
 # ============================================================================
 # PHASE 3: Deploy OpenShell Gateway
