@@ -7,44 +7,8 @@
 # Deploy:  kubectl apply -f deployments/openshell/agents/claude-sdk-agent/deployment.yaml
 # Destroy: kubectl delete -f deployments/openshell/agents/claude-sdk-agent/deployment.yaml
 ---
-# 1. OPA sandbox policy consumed by the OpenShell supervisor
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: claude-sdk-agent-policy
-  namespace: team1
-  labels:
-    app.kubernetes.io/name: claude-sdk-agent
-    app.kubernetes.io/component: policy
-    app.kubernetes.io/managed-by: openshell
-data:
-  policy.yaml: |
-    version: 1
-    filesystem_policy:
-      include_workdir: true
-      read_only:
-        - /usr
-        - /lib
-        - /etc
-        - /app
-      read_write:
-        - /tmp
-    process:
-      run_as_user: sandbox
-      run_as_group: sandbox
-    network_policies:
-      allow_budget_proxy:
-        name: "Allow Budget Proxy (LLM)"
-        endpoints:
-          - host: "llm-budget-proxy.team1.svc"
-            port: 8080
-      allow_outbound_https:
-        name: "Allow outbound HTTPS"
-        endpoints:
-          - host: "*"
-            port: 443
-          - host: "*"
-            port: 80
+# ConfigMap created by openshell-build-agents.sh from policy-data.yaml + sandbox-policy.rego
+# Not inlined here to avoid wildcard policy validation errors
 ---
 # 2. Deployment — Claude SDK agent pod
 apiVersion: apps/v1

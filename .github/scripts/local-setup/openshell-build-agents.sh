@@ -49,12 +49,28 @@ build_and_load() {
     fi
 }
 
-# Build custom agents
+# Build custom agents and create policy ConfigMaps
+AGENT_NS="${AGENT_NS:-team1}"
 for agent_dir in "$AGENTS_DIR"/*/; do
     [ -d "$agent_dir" ] || continue
     agent_name=$(basename "$agent_dir")
+
+    # Build image if Dockerfile exists
     if [ -f "$agent_dir/Dockerfile" ]; then
         build_and_load "$agent_name" "$agent_dir"
+    fi
+
+    # Create policy ConfigMap if both policy files exist (idempotent)
+    if [ -f "$agent_dir/policy-data.yaml" ] && [ -f "$agent_dir/sandbox-policy.rego" ]; then
+        cm_name="${agent_name}-policy"
+        if kubectl get configmap "$cm_name" -n "$AGENT_NS" >/dev/null 2>&1; then
+            log_skip "ConfigMap $cm_name"
+        else
+            log_step "Creating ConfigMap $cm_name..."
+            kubectl create configmap "$cm_name" -n "$AGENT_NS" \
+                --from-file=policy.yaml="$agent_dir/policy-data.yaml" \
+                --from-file=sandbox-policy.rego="$agent_dir/sandbox-policy.rego"
+        fi
     fi
 done
 
