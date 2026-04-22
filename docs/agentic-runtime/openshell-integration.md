@@ -265,7 +265,28 @@ Our custom Claude SDK agent works with LiteMaaS because it uses httpx
 directly with the OpenAI chat/completions format, bypassing Claude CLI's
 model validation.
 
-## 11. TODO: Production Readiness
+## 11. Egress Policy Enforcement Status
+
+| Agent | Supervisor? | OPA Enforced? | Egress |
+|-------|------------|---------------|--------|
+| weather-agent | No | No | **Open** (plain K8s pod) |
+| weather-agent-supervised | **Yes** | **Yes** | Restricted to `*.svc.cluster.local` + LiteMaaS |
+| adk-agent | No | No (policy mounted but not enforced) | **Open** |
+| claude-sdk-agent | No | No (policy mounted but not enforced) | **Open** |
+
+Non-supervised agents have OPA policy files mounted at `/etc/openshell/policy.yaml`
+as preparation for supervisor integration. The policies are NOT enforced until the
+supervisor binary is the container entrypoint. Only `weather-agent-supervised`
+enforces egress control through the supervisor's HTTP CONNECT proxy + OPA engine.
+
+**Blocker for full enforcement:** The supervisor creates a network namespace
+that blocks `kubectl port-forward` and K8s readiness probes. A2A tests
+require port-forward to reach agents from the test runner. Solutions:
+1. Upstream: supervisor exposes agent port through the proxy (not yet supported)
+2. Workaround: run tests from inside the cluster (e.g., test runner pod)
+3. Workaround: use a sidecar that bridges the netns port to the pod network
+
+## 12. TODO: Production Readiness
 
 | Item | Priority | Description |
 |------|----------|-------------|
