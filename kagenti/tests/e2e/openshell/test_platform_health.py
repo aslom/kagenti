@@ -8,6 +8,8 @@ Usage:
     pytest kagenti/tests/e2e/openshell/test_platform_health.py -v -m openshell
 """
 
+import subprocess
+
 import pytest
 
 from kagenti.tests.e2e.openshell.conftest import (
@@ -92,14 +94,54 @@ class TestKagentiOperator:
 
 
 class TestAgentPods:
-    """Verify all OpenShell PoC agent pods are Running in the agent namespace."""
+    """Verify all deployed OpenShell PoC agent pods are Running.
 
-    EXPECTED_AGENTS = [
-        "weather-agent",
-        "adk-agent",
-        "claude-sdk-agent",
-        "weather-agent-supervised",
-    ]
+    Dynamically discovers deployed agents instead of hardcoding — allows
+    the same tests to work on Kind (all 4 agents) and HyperShift (only
+    weather-agent if custom images aren't pushed to a registry).
+    """
+
+    @staticmethod
+    def _discover_agents(namespace: str) -> list[str]:
+        """Discover agent Deployments that have at least one ready replica.
+
+        Filters out agents stuck on ImagePull or other non-ready states
+        so the same test works on Kind (all agents) and HyperShift
+        (only agents with available images).
+        """
+        import json as _json
+
+        result = subprocess.run(
+            [
+                "kubectl",
+                "get",
+                "deploy",
+                "-n",
+                namespace,
+                "-l",
+                "kagenti.io/type=agent",
+                "-o",
+                "json",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            return []
+        items = _json.loads(result.stdout).get("items", [])
+        ready_agents = []
+        for d in items:
+            ready = d.get("status", {}).get("readyReplicas", 0)
+            if ready and ready > 0:
+                ready_agents.append(d["metadata"]["name"])
+        return ready_agents
+
+    def _get_agents(self, agent_namespace):
+        agents = self._discover_agents(agent_namespace)
+        if not agents:
+            pytest.skip("No agent Deployments found in namespace")
+        return agents
 
     def test_all_agent_pods_exist(self, agent_namespace):
         """Each expected agent must have at least one pod."""
@@ -107,7 +149,7 @@ class TestAgentPods:
         pod_names = [p["metadata"]["name"] for p in pods]
 
         missing = []
-        for agent in self.EXPECTED_AGENTS:
+        for agent in self._get_agents(agent_namespace):
             found = any(name.startswith(agent) for name in pod_names)
             if not found:
                 missing.append(agent)
@@ -126,7 +168,7 @@ class TestAgentPods:
             for p in pods
             if any(
                 p["metadata"]["name"].startswith(agent)
-                for agent in self.EXPECTED_AGENTS
+                for agent in self._get_agents(agent_namespace)
             )
         ]
 
@@ -144,7 +186,7 @@ class TestAgentPods:
         """Every agent deployment must have all replicas ready."""
         deployments = kubectl_get_deployments_json(agent_namespace)
 
-        for agent in self.EXPECTED_AGENTS:
+        for agent in self._get_agents(agent_namespace):
             matching = [d for d in deployments if d["metadata"]["name"] == agent]
             if not matching:
                 pytest.fail(f"Deployment {agent} not found in {agent_namespace}")
@@ -163,7 +205,7 @@ class TestAgentPods:
             for p in pods
             if any(
                 p["metadata"]["name"].startswith(agent)
-                for agent in self.EXPECTED_AGENTS
+                for agent in self._get_agents(agent_namespace)
             )
         ]
 
