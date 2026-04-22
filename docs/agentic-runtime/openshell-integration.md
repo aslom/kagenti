@@ -208,7 +208,57 @@ into a composable, driver-based system with four pluggable subsystems:
 | **Control-plane identity** | User/operator auth (mTLS, OIDC) | Keycloak OIDC |
 | **Sandbox identity** | Workload identity (SPIFFE) | SPIRE |
 
-## 9. Related PRs
+## 9. Security: Init Container Pattern (TODO)
+
+The PoC uses `privileged: true` on the supervised agent container because
+the OpenShell supervisor needs `CAP_SYS_ADMIN` + `CAP_NET_ADMIN` for
+network namespace creation (`unshare CLONE_NEWNET` + `mount --make-shared`).
+
+**Current (PoC):** Single container with `privileged: true`. The supervisor
+applies Landlock + seccomp after startup, but there is a window before
+isolation is applied where the process has full host access.
+
+**Target (production):** Use an **init container** for the supervisor:
+
+```yaml
+initContainers:
+- name: supervisor-init
+  image: ghcr.io/nvidia/openshell/supervisor:latest
+  securityContext:
+    privileged: true   # Only init container is privileged
+  command: ["/usr/local/bin/openshell-sandbox", "--setup-only"]
+  # Sets up netns, Landlock, seccomp, then exits
+
+containers:
+- name: agent
+  image: agent:latest
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: [ALL]      # Agent has zero capabilities
+```
+
+The init container runs with elevated privileges for ~2 seconds (netns setup),
+then terminates. The agent container starts with `drop: [ALL]` and inherits
+the isolation. This eliminates the privileged window.
+
+**Requires:** Upstream OpenShell support for `--setup-only` mode (supervisor
+sets up isolation and exits, leaving the netns/Landlock for the next container).
+
+## 10. TODO: Production Readiness
+
+| Item | Priority | Description |
+|------|----------|-------------|
+| Init container pattern | HIGH | Replace `privileged: true` with init container (see section 9) |
+| Enable TLS + auth on gateway | HIGH | Remove `--disable-tls --disable-gateway-auth`, mount TLS certs |
+| Push agent images to registry | HIGH | Use Shipwright on-cluster builds for OCP (manifests in `shipwright-build.yaml`) |
+| Namespace-scoped NetworkPolicy | MEDIUM | Restrict gateway access to agent namespaces only |
+| Audit logging | MEDIUM | Enable OCSF event logging on the supervisor |
+| Vault integration | MEDIUM | Replace K8s Secrets with Vault dynamic credentials |
+| Supervisor-managed A2A port | LOW | Expose agent port through supervisor proxy for netns-compatible testing |
+| Multi-namespace support | LOW | Add RoleBindings for team2, team3, etc. |
+
+## 11. Related PRs
 
 Key upstream PRs relevant to integration:
 

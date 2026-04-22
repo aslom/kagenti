@@ -45,6 +45,10 @@ spec:
       - name: agent
         image: adk-agent:latest
         imagePullPolicy: IfNotPresent
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: [ALL]
         env:
         - name: AGENT_NAME
           value: "adk-agent"

@@ -1,6 +1,12 @@
 # OpenShell Gateway RBAC
-# The gateway needs permissions to manage Sandbox CRDs and supporting
-# resources (pods, secrets, configmaps) in agent namespaces.
+#
+# Security model:
+# - ClusterRole for cluster-scoped resources (Sandbox CRDs, namespaces)
+# - Namespace-scoped Role+RoleBinding for sensitive resources (pods, secrets)
+#   scoped to team1 and openshell-system only
+#
+# TODO (production): Replace --disable-gateway-auth with mTLS.
+# TODO (production): Add NetworkPolicy restricting gateway access.
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -12,114 +18,66 @@ metadata:
     app.kubernetes.io/part-of: kagenti
     app.kubernetes.io/component: openshell
 ---
+# ClusterRole: only for cluster-scoped resources (CRDs, namespaces)
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: openshell-gateway
-  labels:
-    app.kubernetes.io/name: openshell-gateway
-    app.kubernetes.io/part-of: kagenti
-    app.kubernetes.io/component: openshell
 rules:
-# Sandbox CRD management
-- apiGroups:
-  - agents.x-k8s.io
-  resources:
-  - sandboxes
-  - sandboxes/status
-  verbs:
-  - get
-  - list
-  - watch
-  - create
-  - update
-  - patch
-  - delete
-# Pod lifecycle for sandbox execution
-- apiGroups:
-  - ""
-  resources:
-  - pods
-  - pods/log
-  - pods/exec
-  verbs:
-  - get
-  - list
-  - watch
-  - create
-  - update
-  - patch
-  - delete
-# Secrets for agent credentials and TLS
-- apiGroups:
-  - ""
-  resources:
-  - secrets
-  verbs:
-  - get
-  - list
-  - watch
-  - create
-  - update
-  - patch
-  - delete
-# ConfigMaps for sandbox configuration
-- apiGroups:
-  - ""
-  resources:
-  - configmaps
-  verbs:
-  - get
-  - list
-  - watch
-  - create
-  - update
-  - patch
-  - delete
-# Events for status reporting and watching
-- apiGroups:
-  - ""
-  resources:
-  - events
-  verbs:
-  - get
-  - list
-  - watch
-  - create
-  - patch
-# Services for sandbox networking
-- apiGroups:
-  - ""
-  resources:
-  - services
-  verbs:
-  - get
-  - list
-  - watch
-  - create
-  - update
-  - delete
-# Namespaces (read-only)
-- apiGroups:
-  - ""
-  resources:
-  - namespaces
-  verbs:
-  - get
-  - list
-  - watch
+# Sandbox CRD management (cluster-scoped)
+- apiGroups: [agents.x-k8s.io]
+  resources: [sandboxes, sandboxes/status]
+  verbs: [get, list, watch, create, update, patch, delete]
+# Namespaces (read-only, for sandbox namespace discovery)
+- apiGroups: [""]
+  resources: [namespaces]
+  verbs: [get, list, watch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   name: openshell-gateway
-  labels:
-    app.kubernetes.io/name: openshell-gateway
-    app.kubernetes.io/part-of: kagenti
-    app.kubernetes.io/component: openshell
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
+  name: openshell-gateway
+subjects:
+- kind: ServiceAccount
+  name: openshell-gateway
+  namespace: openshell-system
+---
+# Namespace-scoped Role: pods, secrets, configmaps, services, events
+# Scoped to team1 only (add more RoleBindings for additional namespaces)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: openshell-gateway
+  namespace: team1
+rules:
+- apiGroups: [""]
+  resources: [pods, pods/log, pods/exec]
+  verbs: [get, list, watch, create, update, patch, delete]
+- apiGroups: [""]
+  resources: [secrets]
+  verbs: [get, list, watch, create, update, patch, delete]
+- apiGroups: [""]
+  resources: [configmaps]
+  verbs: [get, list, watch, create, update, patch, delete]
+- apiGroups: [""]
+  resources: [services]
+  verbs: [get, list, watch, create, update, delete]
+- apiGroups: [""]
+  resources: [events]
+  verbs: [get, list, watch, create, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: openshell-gateway
+  namespace: team1
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
   name: openshell-gateway
 subjects:
 - kind: ServiceAccount

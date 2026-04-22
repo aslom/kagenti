@@ -45,6 +45,10 @@ spec:
       - name: agent
         image: claude-sdk-agent:latest
         imagePullPolicy: IfNotPresent
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: [ALL]
         env:
         - name: AGENT_NAME
           value: "claude-sdk-agent"

@@ -125,7 +125,10 @@ async def handle_jsonrpc(request: Request) -> JSONResponse:
             )
             reply_text = response.content[0].text
     except Exception as e:
-        reply_text = f"Error calling Claude: {e}"
+        import logging
+
+        logging.getLogger(__name__).exception("LLM call failed")
+        reply_text = "Error: LLM service temporarily unavailable. Please try again."
 
     task_id = str(uuid.uuid4())
     return JSONResponse(

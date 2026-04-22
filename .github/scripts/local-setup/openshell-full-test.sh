@@ -271,11 +271,22 @@ if [ "$SKIP_AGENTS" = "false" ]; then
             --from-literal=skills.json='{"version":"1.0","source":"kagenti/.claude/skills/","skills":[{"name":"review","type":"claude-code-skill"},{"name":"rca","type":"claude-code-skill"},{"name":"k8s:health","type":"claude-code-skill"},{"name":"k8s:pods","type":"claude-code-skill"},{"name":"k8s:logs","type":"claude-code-skill"},{"name":"tdd:kind","type":"claude-code-skill"},{"name":"tdd:hypershift","type":"claude-code-skill"},{"name":"github:pr-review","type":"claude-code-skill"},{"name":"security-review","type":"claude-code-skill"}]}'
     fi
 
-    # Set webhook to Ignore on failure (PoC: agents deploy without AuthBridge)
-    kubectl get mutatingwebhookconfiguration -o name 2>/dev/null | grep kagenti | while read -r webhook; do
-        kubectl patch "$webhook" --type='json' \
-            -p='[{"op":"replace","path":"/webhooks/0/failurePolicy","value":"Ignore"}]' 2>/dev/null || true
-    done
+    # PoC ONLY: Set webhook to Ignore on failure so agents deploy without AuthBridge.
+    # This bypasses admission webhooks — DO NOT use on shared/production clusters.
+    # Production: AuthBridge webhook must be healthy before deploying agents.
+    if [ "$PLATFORM" = "kind" ]; then
+        log_warn "PoC: Setting webhook failurePolicy=Ignore (Kind only)"
+        kubectl get mutatingwebhookconfiguration -o name 2>/dev/null | grep kagenti | while read -r webhook; do
+            kubectl patch "$webhook" --type='json' \
+                -p='[{"op":"replace","path":"/webhooks/0/failurePolicy","value":"Ignore"}]' 2>/dev/null || true
+        done
+    fi
+
+    # OCP: Grant anyuid SCC for OpenShell supervisor (needs UID 1000)
+    if [ "$PLATFORM" = "ocp" ]; then
+        log_step "Granting anyuid SCC for OpenShell gateway..."
+        oc adm policy add-scc-to-user anyuid -z openshell-gateway -n openshell-system 2>/dev/null || true
+    fi
 
     # Build custom agent images (idempotent — skips existing)
     log_step "Building agent images..."
