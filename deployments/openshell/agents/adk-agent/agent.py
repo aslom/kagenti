@@ -59,7 +59,7 @@ def review_pr(diff: str) -> str:
 # Agent definition
 # ---------------------------------------------------------------------------
 root_agent = LlmAgent(
-    name="pr-reviewer",
+    name="pr_reviewer",
     model=_model,
     description="Reviews pull request diffs and provides constructive feedback.",
     instruction=(
