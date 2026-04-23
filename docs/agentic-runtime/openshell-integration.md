@@ -71,6 +71,8 @@ graph TB
 
 ## 3. Two Agent Deployment Modes
 
+> **Detail:** [sandboxing-models.md](sandboxing-models.md)
+
 Kagenti supports two agent deployment modes that coexist:
 
 ### Mode 1: Custom Agents (Kagenti-managed)
@@ -151,7 +153,9 @@ Custom agents use A2A protocol; built-in sandboxes use SSH/exec.
 
 ---
 
-## 5. Supervisor as Container Entrypoint
+## 5. Sandboxing Layers
+
+> **Detail:** [sandboxing-layers.md](sandboxing-layers.md) — supervisor, Landlock, seccomp, netns, OPA, credential isolation, LLM compatibility
 
 Each agent pod uses the OpenShell supervisor as the container entrypoint:
 
@@ -287,6 +291,8 @@ require port-forward to reach agents from the test runner. Solutions:
 3. Workaround: use a sidecar that bridges the netns port to the pod network
 
 ## 12. Phase 1 PoC Results
+
+> **Detail:** [e2e-test-matrix.md](e2e-test-matrix.md) — complete test matrix with per-agent results, future tests
 
 The PoC validates that OpenShell runs on native Kubernetes (Kind and OpenShift/HyperShift)
 with all security layers active. Key results:
@@ -447,7 +453,7 @@ OpenShell sandboxes through the same API used for Deployment-backed agents.
 | Supervisor-managed A2A port | LOW | Expose agent port through supervisor proxy for netns-compatible testing |
 | Multi-namespace support | LOW | Add RoleBindings for team2, team3, etc. |
 
-## 11. Related PRs
+## 15. Related PRs
 
 Key upstream PRs relevant to integration:
 
