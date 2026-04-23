@@ -26,8 +26,8 @@ permissions:
 # Version tracking - keep in sync with kind-config in scripts/kind/setup-kagenti.sh
 env:
   K8S_VERSION: '1.35.0'  # Must match kindest/node version in kind-config
-  # Pinned kagenti-extensions ref for AuthBridge weather advanced E2E (bump when demo/scripts change in a release).
-  KAGENTI_EXTENSIONS_GIT_REF: 'v0.4.1'
+  # kagenti-extensions ref for AuthBridge weather E2E (pin to a release tag once the demo is in a tagged release).
+  KAGENTI_EXTENSIONS_GIT_REF: 'main'
 
 jobs:
   e2e-dev-kagenti-operator:

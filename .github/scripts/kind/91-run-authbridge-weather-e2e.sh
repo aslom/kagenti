@@ -16,7 +16,8 @@
 # Environment:
 #   KAGENTI_EXTENSIONS_ROOT   Path to kagenti-extensions repo (optional)
 #   KAGENTI_EXTENSIONS_GIT_URL  Clone URL (default: https://github.com/kagenti/kagenti-extensions.git)
-#   KAGENTI_EXTENSIONS_GIT_REF  Branch or tag (default: v0.4.1 — pin for reproducible CI; bump when demo updates ship)
+#   KAGENTI_EXTENSIONS_GIT_REF  Branch or tag (default: main). Pin in CI to a release tag once
+#     authbridge/demos/weather-agent is included; verify with: git ls-remote --tags URL
 #   NAMESPACE                 K8s namespace (default: team1)
 #   SKIP_DEPLOY                 If 1, only run in-cluster verify (default: 0 = full deploy)
 #
@@ -59,6 +60,10 @@ fi
 log_info "Preflight OK: keycloak-admin-secret present in $NAMESPACE"
 
 EXT_ROOT="${KAGENTI_EXTENSIONS_ROOT:-}"
+# Trim trailing slash so path joins are never authbridge//...
+if [[ -n "$EXT_ROOT" ]]; then
+    EXT_ROOT="${EXT_ROOT%/}"
+fi
 CLONE_DIR=""
 
 if [[ -n "$EXT_ROOT" ]]; then
@@ -70,7 +75,7 @@ if [[ -n "$EXT_ROOT" ]]; then
     log_info "Using KAGENTI_EXTENSIONS_ROOT: $EXT_ROOT"
 else
     KAGENTI_EXTENSIONS_GIT_URL="${KAGENTI_EXTENSIONS_GIT_URL:-https://github.com/kagenti/kagenti-extensions.git}"
-    KAGENTI_EXTENSIONS_GIT_REF="${KAGENTI_EXTENSIONS_GIT_REF:-v0.4.1}"
+    KAGENTI_EXTENSIONS_GIT_REF="${KAGENTI_EXTENSIONS_GIT_REF:-main}"
     CLONE_DIR="${TMPDIR:-/tmp}/kagenti-extensions-authbridge-e2e-$$"
     log_info "Cloning kagenti-extensions (ref: $KAGENTI_EXTENSIONS_GIT_REF) to $CLONE_DIR"
     if ! git clone --depth 1 --single-branch --branch "$KAGENTI_EXTENSIONS_GIT_REF" \
@@ -81,7 +86,9 @@ else
             exit 1
         }
         (cd "$CLONE_DIR" && git checkout "$KAGENTI_EXTENSIONS_GIT_REF") || {
-            log_error "Could not checkout ref: $KAGENTI_EXTENSIONS_GIT_REF"
+            log_error "Could not checkout ref: $KAGENTI_EXTENSIONS_GIT_REF (branch or tag must exist on the remote)."
+            log_error "Fix: set KAGENTI_EXTENSIONS_GIT_REF to a valid ref (e.g. main), or KAGENTI_EXTENSIONS_ROOT to a local clone with authbridge/demos/weather-agent/."
+            log_error "List tags: git ls-remote --tags $KAGENTI_EXTENSIONS_GIT_URL | tail -5"
             rm -rf "$CLONE_DIR"
             exit 1
         }
@@ -90,6 +97,12 @@ else
 fi
 
 DEMO_DIR="$EXT_ROOT/authbridge/demos/weather-agent"
+if [[ ! -f "$DEMO_DIR/deploy_and_verify_advanced.sh" ]]; then
+    log_error "deploy_and_verify_advanced.sh not found at $DEMO_DIR/"
+    log_error "This ref of kagenti-extensions does not include the AuthBridge weather advanced demo yet."
+    log_error "Use KAGENTI_EXTENSIONS_ROOT pointing at a tree that contains authbridge/demos/weather-agent/, or merge the demo to upstream and retry."
+    exit 1
+fi
 if [[ ! -x "$DEMO_DIR/deploy_and_verify_advanced.sh" ]]; then
     chmod +x "$DEMO_DIR/deploy_and_verify_advanced.sh" 2>/dev/null || true
 fi
