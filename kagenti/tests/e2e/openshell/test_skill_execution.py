@@ -119,34 +119,23 @@ class TestSkillCompatibilityMatrix:
                 f"Skill {skill} not found at {skill_path}"
             )
 
-    def test_compatibility_matrix_documented(self):
-        """Verify skill compatibility is documented."""
-        matrix = {
-            "claude-cli-builtin": {
-                "native_skills": True,
-                "skill_source": ".claude/skills/ (cloned repo)",
-                "requires": "OpenShell sandbox + repo clone",
-            },
-            "claude-sdk-agent": {
-                "native_skills": False,
-                "skill_source": "Skill markdown included in LLM prompt",
-                "requires": "Skill file read + prompt construction",
-            },
-            "adk-agent": {
-                "native_skills": False,
-                "skill_source": "Skill markdown included in LLM prompt",
-                "requires": "Skill file read + prompt construction",
-            },
-            "opencode": {
-                "native_skills": False,
-                "skill_source": "Skill markdown included in prompt",
-                "requires": "OpenAI-compatible LLM + skill prompt",
-            },
-        }
-        assert len(matrix) >= 4
-        assert matrix["claude-cli-builtin"]["native_skills"] is True
-        assert matrix["claude-sdk-agent"]["native_skills"] is False
-        assert matrix["opencode"]["native_skills"] is False
+    def test_skill_directory_has_expected_structure(self):
+        """Each skill directory must contain a SKILL.md file."""
+        skills_dir = os.path.join(REPO_ROOT, ".claude", "skills")
+        if not os.path.isdir(skills_dir):
+            pytest.skip(f"Skills directory not found: {skills_dir}")
+
+        skill_dirs = [
+            d
+            for d in os.listdir(skills_dir)
+            if os.path.isdir(os.path.join(skills_dir, d))
+        ]
+        assert len(skill_dirs) >= 4, (
+            f"Expected 4+ skill directories, found {len(skill_dirs)}"
+        )
+        for d in skill_dirs:
+            skill_md = os.path.join(skills_dir, d, "SKILL.md")
+            assert os.path.exists(skill_md), f"Skill {d} missing SKILL.md"
 
 
 # ═══════════════════════════════════════════════════════════════════════════

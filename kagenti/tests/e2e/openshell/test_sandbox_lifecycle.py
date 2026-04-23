@@ -97,16 +97,26 @@ spec:
 
         # Verify it exists
         time.sleep(3)
-        result = _kubectl(
-            "get",
-            "sandbox",
-            SANDBOX_NAME,
-            "-n",
-            SANDBOX_NS,
-            "-o",
-            "jsonpath={.metadata.name}",
-        )
-        assert result.stdout.strip() == SANDBOX_NAME
+        try:
+            result = _kubectl(
+                "get",
+                "sandbox",
+                SANDBOX_NAME,
+                "-n",
+                SANDBOX_NS,
+                "-o",
+                "jsonpath={.metadata.name}",
+            )
+            assert result.stdout.strip() == SANDBOX_NAME
+        finally:
+            _kubectl(
+                "delete",
+                "sandbox",
+                SANDBOX_NAME,
+                "-n",
+                SANDBOX_NS,
+                "--ignore-not-found",
+            )
 
     @skip_no_crd
     def test_delete_sandbox(self):

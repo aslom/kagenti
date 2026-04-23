@@ -24,7 +24,7 @@ from starlette.routing import Route
 # we use httpx directly with OpenAI chat/completions format.
 # ---------------------------------------------------------------------------
 _base_url = os.environ.get("ANTHROPIC_BASE_URL", "")
-_api_key = os.environ.get("ANTHROPIC_API_KEY", "dummy")
+_api_key = os.environ.get("ANTHROPIC_API_KEY", "")
 _model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
 _use_openai_format = "anthropic.com" not in _base_url and _base_url != ""
 

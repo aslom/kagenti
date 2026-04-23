@@ -32,13 +32,18 @@ data:
       run_as_user: sandbox
       run_as_group: sandbox
     network_policies:
-      allow_all:
-        name: "Allow all outbound"
+      internal:
+        name: "Allow internal cluster services"
         endpoints:
-          - host: "*"
+          - host: "*.svc.cluster.local"
+            port: 8080
+          - host: "*.svc.cluster.local"
             port: 443
-          - host: "*"
-            port: 80
+      weather_api:
+        name: "Allow Open-Meteo weather API"
+        endpoints:
+          - host: "api.open-meteo.com"
+            port: 443
 ---
 # 2. Deployment — standard agent pod (supervisor entrypoint deferred to
 #    a later step when the supervisor image is available)

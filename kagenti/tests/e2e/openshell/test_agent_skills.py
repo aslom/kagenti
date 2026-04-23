@@ -141,12 +141,11 @@ class TestADKAgentSkills:
                 f"{adk_agent_url}/.well-known/agent.json",
                 timeout=30.0,
             )
-        # ADK may serve at /agent.json or /.well-known/agent-card.json
-        if resp.status_code == 404:
-            resp = await client.get(
-                f"{adk_agent_url}/.well-known/agent-card.json",
-                timeout=30.0,
-            )
+            if resp.status_code == 404:
+                resp = await client.get(
+                    f"{adk_agent_url}/.well-known/agent-card.json",
+                    timeout=30.0,
+                )
         assert resp.status_code == 200
 
 
