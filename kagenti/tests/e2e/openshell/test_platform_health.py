@@ -125,7 +125,7 @@ class TestAgentPods:
             ],
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=30,
         )
         if result.returncode != 0:
             return []
@@ -146,7 +146,9 @@ class TestAgentPods:
     def test_all_agent_pods_exist(self, agent_namespace):
         """Each expected agent must have at least one pod."""
         pods = kubectl_get_pods_json(agent_namespace)
-        pod_names = [p["metadata"]["name"] for p in pods]
+        pod_names = [
+            p["metadata"]["name"] for p in pods if "-build" not in p["metadata"]["name"]
+        ]
 
         missing = []
         for agent in self._get_agents(agent_namespace):
@@ -170,6 +172,7 @@ class TestAgentPods:
                 p["metadata"]["name"].startswith(agent)
                 for agent in self._get_agents(agent_namespace)
             )
+            and "-build" not in p["metadata"]["name"]
         ]
 
         assert len(agent_pods) > 0, f"No agent pods found in {agent_namespace}"
@@ -207,6 +210,7 @@ class TestAgentPods:
                 p["metadata"]["name"].startswith(agent)
                 for agent in self._get_agents(agent_namespace)
             )
+            and "-build" not in p["metadata"]["name"]
         ]
 
         crashlooping = []

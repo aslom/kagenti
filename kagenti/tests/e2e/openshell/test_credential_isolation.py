@@ -63,7 +63,7 @@ class TestSecretDelivery:
             ],
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=30,
         )
         if result.returncode != 0:
             pytest.skip(f"Deployment {agent} not found")
@@ -109,7 +109,7 @@ class TestNoHardcodedSecrets:
             ],
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=30,
         )
         if result.returncode != 0:
             pytest.skip(f"Deployment {agent} not found")

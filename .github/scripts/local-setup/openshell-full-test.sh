@@ -199,16 +199,28 @@ fi
 if [ "$SKIP_INSTALL" = "false" ]; then
     log_phase "PHASE 2: Install Kagenti Platform (OpenShell profile)"
 
-    log_step "Creating secrets..."
-    ./.github/scripts/common/20-create-secrets.sh
+    if [ "$PLATFORM" = "ocp" ]; then
+        # OCP: Use the Helm-based installer (scripts/ocp/setup-kagenti.sh)
+        # This handles cert-manager, Keycloak, SPIRE, Istio, and the operator
+        # without Ansible. Skip UI/MLflow/MCP Gateway for OpenShell PoC.
+        log_step "Running Helm-based OCP installer..."
+        "$REPO_ROOT/scripts/ocp/setup-kagenti.sh" \
+            --kagenti-repo "$REPO_ROOT" \
+            --skip-ui \
+            --skip-mlflow \
+            --skip-mcp-gateway \
+            --skip-ovn-patch
+    else
+        # Kind: Use the Ansible installer with the openshell env profile
+        log_step "Creating secrets..."
+        ./.github/scripts/common/20-create-secrets.sh
 
-    log_step "Running Ansible installer (--env $KAGENTI_ENV)..."
-    ./.github/scripts/kagenti-operator/30-run-installer.sh --env "$KAGENTI_ENV"
+        log_step "Running Ansible installer (--env $KAGENTI_ENV)..."
+        ./.github/scripts/kagenti-operator/30-run-installer.sh --env "$KAGENTI_ENV"
 
-    log_step "Waiting for platform to be ready..."
-    ./.github/scripts/common/40-wait-platform-ready.sh
+        log_step "Waiting for platform to be ready..."
+        ./.github/scripts/common/40-wait-platform-ready.sh
 
-    if [ "$PLATFORM" = "kind" ]; then
         log_step "Configuring dockerhost..."
         ./.github/scripts/common/70-configure-dockerhost.sh
     fi
@@ -238,6 +250,64 @@ kubectl wait --for=condition=ready pod --all -n openshell-system --timeout=180s 
 log_step "OpenShell Gateway status:"
 kubectl get pods -n openshell-system
 
+# ── Configure gateway LLM providers (idempotent) ────────────────
+# The OpenShell gateway auto-discovers LLM providers from env vars.
+# Setting OPENAI_API_KEY + OPENAI_BASE_URL enables builtin sandboxes
+# (OpenCode, Claude) to use LiteMaaS for inference.
+if [ "${MAAS_SOURCED:-false}" = "true" ]; then
+    LITEMAAS_URL="${MAAS_LLAMA4_API_BASE:-https://litellm-prod.apps.maas.redhatworkshops.io/v1}"
+    LITEMAAS_KEY="${MAAS_LLAMA4_API_KEY:-}"
+    LITEMAAS_MODEL="${MAAS_LLAMA4_MODEL:-llama-scout-17b}"
+    if [ -n "$LITEMAAS_KEY" ]; then
+        log_step "Configuring gateway with LiteMaaS provider credentials"
+        kubectl set env statefulset/openshell-gateway -n openshell-system \
+            "OPENAI_API_KEY=$LITEMAAS_KEY" \
+            "OPENAI_BASE_URL=$LITEMAAS_URL" \
+            "OPENAI_MODEL=$LITEMAAS_MODEL" 2>/dev/null || true
+        kubectl rollout status statefulset/openshell-gateway -n openshell-system --timeout=120s 2>/dev/null || {
+            log_warn "Gateway rollout not complete after provider config"
+        }
+    fi
+fi
+
+# ── Pre-pull base sandbox image (idempotent) ─────────────────────
+# The base image is ~1.1GB. Pre-pulling ensures test_base_image_cli_check
+# doesn't time out waiting for the pull.
+BASE_IMAGE="ghcr.io/nvidia/openshell-community/sandboxes/base:latest"
+if [ "$PLATFORM" = "kind" ]; then
+    if ! docker exec "${CLUSTER_NAME}-control-plane" crictl images 2>/dev/null | grep -q "sandboxes/base"; then
+        log_step "Pre-pulling base sandbox image into Kind..."
+        docker pull "$BASE_IMAGE" 2>/dev/null && \
+            kind load docker-image "$BASE_IMAGE" --name "$CLUSTER_NAME" 2>/dev/null || \
+            log_warn "Base image pre-pull failed (non-critical)"
+    else
+        log_step "Base sandbox image already loaded in Kind"
+    fi
+else
+    # OCP: Start a pull Job in the background (non-blocking)
+    if ! kubectl get job openshell-base-pull -n team1 >/dev/null 2>&1; then
+        log_step "Starting base sandbox image pre-pull Job..."
+        kubectl apply -f - <<EOJOB 2>/dev/null || true
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: openshell-base-pull
+  namespace: team1
+spec:
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      containers:
+      - name: pull
+        image: $BASE_IMAGE
+        command: ["echo", "Image pulled successfully"]
+      restartPolicy: Never
+EOJOB
+    else
+        log_step "Base image pre-pull Job already exists"
+    fi
+fi
+
 # ============================================================================
 # PHASE 4: Deploy Agents
 # ============================================================================
@@ -247,34 +317,37 @@ if [ "$SKIP_AGENTS" = "false" ]; then
     # Ensure team1 namespace exists
     kubectl get ns team1 >/dev/null 2>&1 || kubectl create ns team1
 
-    # Create LLM secret from .env.maas if available, otherwise placeholder
-    if kubectl get secret litellm-virtual-keys -n team1 >/dev/null 2>&1; then
-        log_step "LLM secret already exists."
-    elif [ -f "$REPO_ROOT/.env.maas" ]; then
-        log_step "Creating LLM secret from .env.maas..."
+    # ── LLM secret (idempotent) ─────────────────────────────────────
+    # Source .env.maas early — we need the keys for both the secret and env patching.
+    # Check REPO_ROOT, CWD, and git main worktree (worktrees have .env in parent).
+    MAAS_SOURCED=false
+    MAAS_FILE=""
+    GIT_MAIN_WORKTREE="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null | sed 's|/\.git$||' || echo "")"
+    for candidate in "$REPO_ROOT/.env.maas" "$PWD/.env.maas" "$GIT_MAIN_WORKTREE/.env.maas"; do
+        if [ -n "$candidate" ] && [ -f "$candidate" ]; then
+            MAAS_FILE="$candidate"
+            break
+        fi
+    done
+    if [ -n "$MAAS_FILE" ]; then
         # shellcheck source=/dev/null
-        source "$REPO_ROOT/.env.maas"
-        kubectl create secret generic litellm-virtual-keys -n team1 \
-            --from-literal=api-key="${MAAS_LLAMA4_API_KEY:-sk-poc-placeholder}"
-    else
-        log_step "Creating placeholder LLM secret..."
-        kubectl create secret generic litellm-virtual-keys -n team1 \
-            --from-literal=api-key=sk-poc-placeholder
+        source "$MAAS_FILE"
+        MAAS_SOURCED=true
+        log_step "Loaded LiteMaaS credentials from $(basename "$MAAS_FILE")"
     fi
 
-    # Create skills ConfigMap if not exists
-    if kubectl get configmap kagenti-skills -n team1 >/dev/null 2>&1; then
-        log_step "Skills ConfigMap already exists."
-    else
-        log_step "Creating kagenti-skills ConfigMap..."
-        kubectl create configmap kagenti-skills -n team1 \
-            --from-literal=skills.json='{"version":"1.0","source":"kagenti/.claude/skills/","skills":[{"name":"review","type":"claude-code-skill"},{"name":"rca","type":"claude-code-skill"},{"name":"k8s:health","type":"claude-code-skill"},{"name":"k8s:pods","type":"claude-code-skill"},{"name":"k8s:logs","type":"claude-code-skill"},{"name":"tdd:kind","type":"claude-code-skill"},{"name":"tdd:hypershift","type":"claude-code-skill"},{"name":"github:pr-review","type":"claude-code-skill"},{"name":"security-review","type":"claude-code-skill"}]}'
-    fi
+    kubectl create secret generic litellm-virtual-keys -n team1 \
+        --from-literal=api-key="${MAAS_LLAMA4_API_KEY:-sk-poc-placeholder}" \
+        --dry-run=client -o yaml | kubectl apply -f - 2>&1 | grep -v "^Warning:"
 
-    # PoC ONLY: Set webhook to Ignore on failure so agents deploy without AuthBridge.
-    # This bypasses admission webhooks — DO NOT use on shared/production clusters.
-    # Production: AuthBridge webhook must be healthy before deploying agents.
+    # ── Skills ConfigMap (idempotent) ───────────────────────────────
+    kubectl create configmap kagenti-skills -n team1 \
+        --from-literal=skills.json='{"version":"1.0","source":"kagenti/.claude/skills/","skills":[{"name":"review","type":"claude-code-skill"},{"name":"rca","type":"claude-code-skill"},{"name":"k8s:health","type":"claude-code-skill"},{"name":"k8s:pods","type":"claude-code-skill"},{"name":"k8s:logs","type":"claude-code-skill"},{"name":"tdd:kind","type":"claude-code-skill"},{"name":"tdd:hypershift","type":"claude-code-skill"},{"name":"github:pr-review","type":"claude-code-skill"},{"name":"security-review","type":"claude-code-skill"}]}' \
+        --dry-run=client -o yaml | kubectl apply -f - 2>&1 | grep -v "^Warning:"
+
+    # ── Platform-specific setup ─────────────────────────────────────
     if [ "$PLATFORM" = "kind" ]; then
+        # PoC ONLY: Set webhook to Ignore so agents deploy without AuthBridge.
         log_warn "PoC: Setting webhook failurePolicy=Ignore (Kind only)"
         kubectl get mutatingwebhookconfiguration -o name 2>/dev/null | grep kagenti | while read -r webhook; do
             kubectl patch "$webhook" --type='json' \
@@ -282,18 +355,17 @@ if [ "$SKIP_AGENTS" = "false" ]; then
         done
     fi
 
-    # OCP: Grant anyuid SCC for OpenShell supervisor (needs UID 1000)
     if [ "$PLATFORM" = "ocp" ]; then
-        log_step "Granting anyuid SCC for OpenShell gateway..."
+        # Gateway needs UID 1000 (anyuid)
+        log_step "Granting SCCs for OpenShell agents..."
         oc adm policy add-scc-to-user anyuid -z openshell-gateway -n openshell-system 2>/dev/null || true
+        # Supervised agent needs privileged (Landlock + mount --make-shared)
+        oc adm policy add-scc-to-user privileged -z default -n team1 2>/dev/null || true
     fi
 
-    # Build custom agent images (idempotent — skips existing)
-    log_step "Building agent images..."
-    PLATFORM="$PLATFORM" CLUSTER_NAME="$CLUSTER_NAME" \
-        ./.github/scripts/local-setup/openshell-build-agents.sh
-
-    # Apply agent manifests
+    # ── Apply agent manifests FIRST ────────────────────────────────
+    # Manifests use local image names (e.g., adk-agent:latest).
+    # The build script will patch these to internal registry refs on OCP.
     AGENTS_DIR="deployments/openshell/agents"
     if [ -d "$AGENTS_DIR" ]; then
         for manifest in "$AGENTS_DIR"/*.yaml "$AGENTS_DIR"/*/deployment.yaml; do
@@ -301,15 +373,49 @@ if [ "$SKIP_AGENTS" = "false" ]; then
             log_step "Applying: $manifest"
             kubectl apply -f "$manifest" 2>&1 | grep -v "ensure CRDs" || true
         done
-
-        log_step "Waiting for agent pods to be ready (up to 180s)..."
-        kubectl wait --for=condition=ready pod -l kagenti.io/type=agent -n team1 --timeout=180s 2>/dev/null || {
-            log_warn "Some agent pods not ready. Checking status..."
-        }
-        kubectl get pods -n team1 -l kagenti.io/type=agent
-    else
-        log_step "No agent manifests at $AGENTS_DIR. Skipping."
     fi
+
+    # ── Build custom agent images (idempotent) ──────────────────────
+    # On Kind: docker build + kind load.
+    # On OCP: oc binary build + patch deployment image to internal registry.
+    log_step "Building agent images..."
+    PLATFORM="$PLATFORM" CLUSTER_NAME="$CLUSTER_NAME" AGENT_NS="team1" \
+        ./.github/scripts/local-setup/openshell-build-agents.sh
+
+    # ── Patch LLM env vars (idempotent) ─────────────────────────────
+    # Deployment YAMLs point to the Budget Proxy by default.
+    # When the Budget Proxy is not deployed, patch agents to call LiteMaaS directly.
+    if ! kubectl get svc llm-budget-proxy -n team1 >/dev/null 2>&1; then
+        if [ "$MAAS_SOURCED" = "true" ]; then
+            LITEMAAS_URL="${MAAS_LLAMA4_API_BASE:-https://litellm-prod.apps.maas.redhatworkshops.io/v1}"
+            LITEMAAS_MODEL="${MAAS_LLAMA4_MODEL:-llama-scout-17b}"
+            log_step "No Budget Proxy — patching agents to use LiteMaaS directly"
+
+            # ADK agent: LiteLlm uses OPENAI_API_BASE / LLM_MODEL
+            kubectl set env deploy/adk-agent -n team1 \
+                "OPENAI_API_BASE=$LITEMAAS_URL" \
+                "LLM_MODEL=openai/$LITEMAAS_MODEL" 2>/dev/null || true
+
+            # Claude SDK agent: uses ANTHROPIC_BASE_URL / ANTHROPIC_MODEL
+            # (OpenAI-compatible format auto-detected when base_url is not anthropic.com)
+            kubectl set env deploy/claude-sdk-agent -n team1 \
+                "ANTHROPIC_BASE_URL=$LITEMAAS_URL" \
+                "ANTHROPIC_MODEL=$LITEMAAS_MODEL" 2>/dev/null || true
+        else
+            log_warn "No Budget Proxy and no .env.maas — LLM tests will skip"
+        fi
+    else
+        log_step "Budget Proxy deployed — agents will route through proxy"
+    fi
+
+    # ── Wait for all rollouts to complete ─────────────────────────────
+    log_step "Waiting for agent rollouts to complete..."
+    for deploy in $(kubectl get deploy -n team1 -l kagenti.io/type=agent -o name 2>/dev/null); do
+        kubectl rollout status "$deploy" -n team1 --timeout=180s 2>/dev/null || {
+            log_warn "$deploy rollout not complete"
+        }
+    done
+    kubectl get pods -n team1 -l kagenti.io/type=agent
 else
     log_phase "PHASE 4: Skipping Agent Deployment"
 fi
@@ -328,16 +434,26 @@ if [ "$SKIP_TEST" = "false" ]; then
 
     export KAGENTI_CONFIG_FILE="deployments/envs/dev_values_openshell.yaml"
 
-    # Enable LLM tests if .env.maas is available
-    if [ -f "$REPO_ROOT/.env.maas" ]; then
+    # Enable LLM tests if .env.maas is available anywhere
+    if [ "${MAAS_SOURCED:-false}" = "true" ]; then
         export OPENSHELL_LLM_AVAILABLE=true
         log_step "LiteMaaS available — LLM tests enabled"
+    else
+        # Agents phase may have been skipped — search for .env.maas independently
+        _GIT_MAIN="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null | sed 's|/\.git$||' || echo "")"
+        for _c in "$REPO_ROOT/.env.maas" "$PWD/.env.maas" "$_GIT_MAIN/.env.maas"; do
+            if [ -n "$_c" ] && [ -f "$_c" ]; then
+                export OPENSHELL_LLM_AVAILABLE=true
+                log_step "LiteMaaS available — LLM tests enabled"
+                break
+            fi
+        done
     fi
 
     TEST_DIR="kagenti/tests/e2e/openshell"
     if [ -d "$TEST_DIR" ]; then
         log_step "Running OpenShell E2E tests..."
-        uv run pytest "$TEST_DIR" -v --timeout=120
+        uv run pytest "$TEST_DIR" -v --timeout=300
     else
         log_step "No tests at $TEST_DIR. Skipping."
     fi

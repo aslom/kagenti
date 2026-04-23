@@ -72,7 +72,7 @@ def _create_skills_configmap():
         ],
         capture_output=True,
         text=True,
-        timeout=10,
+        timeout=30,
     )
     return result.returncode == 0
 
@@ -129,7 +129,7 @@ class TestAgentSkillAwareness:
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 f"{weather_agent_url}/.well-known/agent-card.json",
-                timeout=10.0,
+                timeout=30.0,
             )
         if resp.status_code != 200:
             pytest.skip("Agent card endpoint not available")
@@ -145,7 +145,7 @@ class TestAgentSkillAwareness:
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 f"{claude_sdk_agent_url}/.well-known/agent-card.json",
-                timeout=10.0,
+                timeout=30.0,
             )
         if resp.status_code != 200:
             pytest.skip("Agent card endpoint not available")

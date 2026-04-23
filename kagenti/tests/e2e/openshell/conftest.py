@@ -99,19 +99,21 @@ def _port_forward(name: str, namespace: str, remote_port: int):
     )
     import time
 
-    time.sleep(3)
-
-    # Test if port-forward actually works (netns may block it)
+    # Port-forward startup can be slow on remote clusters (HyperShift).
+    # Retry connection with backoff instead of a single sleep+check.
     import socket
 
-    try:
-        sock = socket.create_connection(("localhost", local_port), timeout=3)
-        sock.close()
-        return f"http://localhost:{local_port}", proc
-    except (ConnectionRefusedError, OSError, TimeoutError):
-        proc.terminate()
-        proc.wait()
-        return None, None
+    for attempt in range(6):
+        time.sleep(3)
+        try:
+            sock = socket.create_connection(("localhost", local_port), timeout=5)
+            sock.close()
+            return f"http://localhost:{local_port}", proc
+        except (ConnectionRefusedError, OSError, TimeoutError):
+            if attempt >= 5:
+                proc.terminate()
+                proc.wait()
+                return None, None
 
 
 def _get_unsupervised_url(name: str, namespace: str, port: int):
@@ -190,6 +192,7 @@ async def a2a_send(
     text: str,
     *,
     request_id: str = "test-1",
+    context_id: str | None = None,
     timeout: float = 120.0,
 ) -> dict:
     """Send an A2A ``message/send`` JSON-RPC request and return the parsed response.
@@ -199,26 +202,37 @@ async def a2a_send(
         url: Agent A2A endpoint URL.
         text: User message text.
         request_id: JSON-RPC request id.
+        context_id: Optional context ID for multi-turn conversations.
         timeout: Per-request timeout in seconds.
 
     Returns:
         Parsed JSON response dict.
     """
+    params: dict = {
+        "message": {
+            "role": "user",
+            "messageId": f"msg-{request_id}",
+            "parts": [{"type": "text", "text": text}],
+        }
+    }
+    if context_id:
+        params["contextId"] = context_id
+
     payload = {
         "jsonrpc": "2.0",
         "id": request_id,
         "method": "message/send",
-        "params": {
-            "message": {
-                "role": "user",
-                "messageId": f"msg-{request_id}",
-                "parts": [{"type": "text", "text": text}],
-            }
-        },
+        "params": params,
     }
     response = await client.post(url, json=payload, timeout=timeout)
     response.raise_for_status()
     return response.json()
+
+
+def extract_context_id(response: dict) -> str | None:
+    """Extract contextId from an A2A response for multi-turn conversations."""
+    result = response.get("result", {})
+    return result.get("contextId")
 
 
 def extract_a2a_text(response: dict) -> str:
