@@ -25,6 +25,7 @@ spec:
         kagenti.io/type: agent
         app.kubernetes.io/name: weather-agent-supervised
     spec:
+      serviceAccountName: openshell-supervisor
       containers:
       - name: agent
         image: weather-agent-supervised:latest

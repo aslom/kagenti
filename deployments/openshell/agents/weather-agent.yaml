@@ -76,6 +76,10 @@ spec:
       - name: agent
         image: ghcr.io/kagenti/agent-examples/weather_service:latest
         imagePullPolicy: Always
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: [ALL]
         env:
         - name: AGENT_NAME
           value: "weather-agent"

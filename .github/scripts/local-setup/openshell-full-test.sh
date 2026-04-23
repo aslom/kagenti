@@ -337,7 +337,7 @@ if [ "$SKIP_AGENTS" = "false" ]; then
     fi
 
     kubectl create secret generic litellm-virtual-keys -n team1 \
-        --from-literal=api-key="${MAAS_LLAMA4_API_KEY:-sk-poc-placeholder}" \
+        --from-literal=api-key="${MAAS_LLAMA4_API_KEY:-PLACEHOLDER-no-llm-key-set}" \
         --dry-run=client -o yaml | kubectl apply -f - 2>&1 | grep -v "^Warning:"
 
     # ── Skills ConfigMap (idempotent) ───────────────────────────────
@@ -360,7 +360,9 @@ if [ "$SKIP_AGENTS" = "false" ]; then
         log_step "Granting SCCs for OpenShell agents..."
         oc adm policy add-scc-to-user anyuid -z openshell-gateway -n openshell-system 2>/dev/null || true
         # Supervised agent needs privileged (Landlock + mount --make-shared)
-        oc adm policy add-scc-to-user privileged -z default -n team1 2>/dev/null || true
+        oc adm policy add-scc-to-user privileged -z openshell-supervisor -n team1 2>/dev/null || true
+        # Create SA if it doesn't exist (the supervised agent deployment should use this SA)
+        kubectl create serviceaccount openshell-supervisor -n team1 --dry-run=client -o yaml | kubectl apply -f - 2>/dev/null || true
     fi
 
     # ── Apply agent manifests FIRST ────────────────────────────────
