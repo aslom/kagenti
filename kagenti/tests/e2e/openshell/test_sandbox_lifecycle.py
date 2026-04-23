@@ -110,28 +110,45 @@ spec:
 
     @skip_no_crd
     def test_delete_sandbox(self):
-        """Delete the test sandbox CR."""
-        # Ensure it exists first
+        """Create then delete a sandbox CR — self-contained."""
+        delete_name = "test-sandbox-delete"
         _kubectl(
-            "get",
-            "sandbox",
-            SANDBOX_NAME,
-            "-n",
-            SANDBOX_NS,
+            "delete", "sandbox", delete_name, "-n", SANDBOX_NS, "--ignore-not-found"
         )
+        time.sleep(2)
+
+        sandbox_yaml = f"""
+apiVersion: agents.x-k8s.io/v1alpha1
+kind: Sandbox
+metadata:
+  name: {delete_name}
+  namespace: {SANDBOX_NS}
+spec:
+  podTemplate:
+    spec:
+      containers:
+      - name: sandbox
+        image: ghcr.io/nvidia/openshell-community/sandboxes/base:latest
+        command: ["sleep", "60"]
+"""
+        subprocess.run(
+            ["kubectl", "apply", "-f", "-"],
+            input=sandbox_yaml,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        time.sleep(3)
 
         result = _kubectl(
             "delete",
             "sandbox",
-            SANDBOX_NAME,
+            delete_name,
             "-n",
             SANDBOX_NS,
             "--timeout=30s",
         )
-        # Accept both success (deleted) and not-found (already gone)
-        assert result.returncode == 0 or "NotFound" in result.stderr, (
-            f"Failed to delete sandbox: {result.stderr}"
-        )
+        assert result.returncode == 0, f"Failed to delete sandbox: {result.stderr}"
 
     @skip_no_crd
     def test_gateway_processes_sandbox(self):

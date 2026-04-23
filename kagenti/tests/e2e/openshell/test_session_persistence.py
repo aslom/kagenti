@@ -346,32 +346,41 @@ class TestConversationSurvivesRestart:
     """
 
     @pytest.mark.parametrize("agent", ALL_A2A_AGENTS_PORTFORWARD)
-    async def test_multiturn_across_restart(self, agent, agent_namespace, request):
-        """Turn 1 -> scale 0 -> scale 1 -> Turn 2: does context survive?"""
+    async def test_multiturn_across_restart(self, agent, agent_namespace):
+        """Turn 1 -> scale 0 -> scale 1 -> Turn 2: does context survive?
+
+        Uses own port-forwards (not session fixtures) to avoid invalidating
+        other tests' session-scoped fixtures after the scale cycle.
+        """
         if not _deploy_ready(agent, agent_namespace):
             pytest.skip(f"{agent}: not deployed")
         if agent in LLM_AGENTS and not LLM_AVAILABLE:
             pytest.skip(f"{agent}: requires LLM")
-        url = _url(agent, request)
-        if not url:
-            pytest.skip(f"{agent}: cannot reach")
+
+        from kagenti.tests.e2e.openshell.conftest import _port_forward
 
         prompts = PROMPTS.get(agent, ["Hello"] * 3)
 
-        # Turn 1 (pre-restart)
-        async with httpx.AsyncClient() as c:
-            r1 = await a2a_send(c, url, prompts[0], request_id=f"{agent}-pre")
-        assert "result" in r1
-        ctx = extract_context_id(r1)
+        # Turn 1 (pre-restart, own port-forward)
+        url1, proc1 = _port_forward(agent, agent_namespace, 8080)
+        if not url1:
+            pytest.skip(f"{agent}: cannot reach")
+        try:
+            async with httpx.AsyncClient() as c:
+                r1 = await a2a_send(c, url1, prompts[0], request_id=f"{agent}-pre")
+            assert "result" in r1
+            ctx = extract_context_id(r1)
+        finally:
+            if proc1:
+                proc1.terminate()
+                proc1.wait()
 
         # Restart
         _scale_agent(agent, 0, agent_namespace)
         _scale_agent(agent, 1, agent_namespace)
 
         # Turn 2 (post-restart, new port-forward)
-        from kagenti.tests.e2e.openshell.conftest import _port_forward
-
-        url2, proc = _port_forward(agent, agent_namespace, 8080)
+        url2, proc2 = _port_forward(agent, agent_namespace, 8080)
         if not url2:
             pytest.fail(f"{agent}: unreachable after restart")
         try:
@@ -393,9 +402,9 @@ class TestConversationSurvivesRestart:
                     f"TODO: PVC-backed session checkpoint + Kagenti backend restore."
                 )
         finally:
-            if proc:
-                proc.terminate()
-                proc.wait()
+            if proc2:
+                proc2.terminate()
+                proc2.wait()
 
     @pytest.mark.parametrize(
         "agent",

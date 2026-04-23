@@ -477,7 +477,7 @@ class TestRealWorldSkillExecution:
         text_lower = text.lower()
         assert any(
             kw in text_lower
-            for kw in ["secret", "litellm", "missing", "not found", "root cause", "fix"]
+            for kw in ["secret", "webhook", "tls", "mount", "not found", "root cause"]
         ), f"Response doesn't identify root cause: {text[:200]}"
 
     @skip_no_llm

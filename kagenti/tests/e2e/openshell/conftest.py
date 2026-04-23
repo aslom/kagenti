@@ -85,26 +85,29 @@ def _port_forward(name: str, namespace: str, remote_port: int):
     OpenShell netns which blocks external access), returns None.
     """
     local_port = _find_free_port()
-    proc = subprocess.Popen(
-        [
-            "kubectl",
-            "port-forward",
-            f"svc/{name}",
-            f"{local_port}:{remote_port}",
-            "-n",
-            namespace,
-        ],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    import time
+    try:
+        proc = subprocess.Popen(
+            [
+                "kubectl",
+                "port-forward",
+                f"svc/{name}",
+                f"{local_port}:{remote_port}",
+                "-n",
+                namespace,
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except FileNotFoundError:
+        return None, None
 
-    # Port-forward startup can be slow on remote clusters (HyperShift).
-    # Retry connection with backoff instead of a single sleep+check.
     import socket
+    import time
 
     for attempt in range(6):
         time.sleep(3)
+        if proc.poll() is not None:
+            return None, None
         try:
             sock = socket.create_connection(("localhost", local_port), timeout=5)
             sock.close()
@@ -114,29 +117,6 @@ def _port_forward(name: str, namespace: str, remote_port: int):
                 proc.terminate()
                 proc.wait()
                 return None, None
-
-
-def _get_unsupervised_url(name: str, namespace: str, port: int):
-    """For agents with netns (supervised), use the non-supervised variant's URL.
-
-    When the supervisor creates a netns, external port-forward can't reach
-    the agent. We fall back to the non-supervised weather-agent for A2A
-    tests, or use kubectl exec for supervised-specific tests.
-    """
-    # Try port-forward first
-    url, proc = _port_forward(name, namespace, port)
-    if url:
-        return url, proc
-
-    # Supervised agent — port-forward blocked by netns
-    # Try the non-supervised variant if it exists
-    alt_name = name.replace("-supervised", "")
-    if alt_name != name:
-        url, proc = _port_forward(alt_name, namespace, port)
-        if url:
-            return url, proc
-
-    return None, None
 
 
 @pytest.fixture(scope="session")
