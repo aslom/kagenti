@@ -349,9 +349,15 @@ class TestConversationSurvivesRestart:
     async def test_multiturn_across_restart(self, agent, agent_namespace):
         """Turn 1 -> scale 0 -> scale 1 -> Turn 2: does context survive?
 
-        Uses own port-forwards (not session fixtures) to avoid invalidating
-        other tests' session-scoped fixtures after the scale cycle.
+        DESTRUCTIVE: scales agent to 0 then back. This kills session-scoped
+        port-forward fixtures for other tests. Run last or separately.
+        Skip by default — enable with OPENSHELL_DESTRUCTIVE_TESTS=true.
         """
+        if os.getenv("OPENSHELL_DESTRUCTIVE_TESTS", "").lower() != "true":
+            pytest.skip(
+                f"{agent}: destructive restart test skipped (kills port-forwards). "
+                f"Enable with OPENSHELL_DESTRUCTIVE_TESTS=true."
+            )
         if not _deploy_ready(agent, agent_namespace):
             pytest.skip(f"{agent}: not deployed")
         if agent in LLM_AGENTS and not LLM_AVAILABLE:
@@ -413,6 +419,10 @@ class TestConversationSurvivesRestart:
         ],
     )
     async def test_multiturn_across_restart_supervised(self, agent, agent_namespace):
+        if os.getenv("OPENSHELL_DESTRUCTIVE_TESTS", "").lower() != "true":
+            pytest.skip(
+                f"{agent}: destructive test skipped. Enable with OPENSHELL_DESTRUCTIVE_TESTS=true."
+            )
         if not _deploy_ready(agent, agent_namespace):
             pytest.skip(f"{agent}: not deployed")
 
@@ -431,6 +441,10 @@ class TestConversationSurvivesRestart:
     @pytest.mark.parametrize("agent", ALL_A2A_AGENTS)
     async def test_pod_uid_changes_after_restart(self, agent, agent_namespace):
         """Confirm restart creates a new pod (not the same one)."""
+        if os.getenv("OPENSHELL_DESTRUCTIVE_TESTS", "").lower() != "true":
+            pytest.skip(
+                f"{agent}: destructive test skipped. Enable with OPENSHELL_DESTRUCTIVE_TESTS=true."
+            )
         if not _deploy_ready(agent, agent_namespace):
             pytest.skip(f"{agent}: not deployed")
 
