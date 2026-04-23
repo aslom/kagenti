@@ -286,7 +286,155 @@ require port-forward to reach agents from the test runner. Solutions:
 2. Workaround: run tests from inside the cluster (e.g., test runner pod)
 3. Workaround: use a sidecar that bridges the netns port to the pod network
 
-## 12. TODO: Production Readiness
+## 12. Phase 1 PoC Results
+
+The PoC validates that OpenShell runs on native Kubernetes (Kind and OpenShift/HyperShift)
+with all security layers active. Key results:
+
+| Metric | Kind | HyperShift (OCP) |
+|--------|------|------------------|
+| E2E tests passed | 84+ | 80+ |
+| E2E tests failed | 0 | 0 |
+| E2E tests skipped | 7 | 9 |
+| Agent types tested | 7 (4 A2A + 3 builtin) | 7 |
+| Platforms | Kind with Istio | HyperShift (OCP 4.20) |
+
+### Agent taxonomy (all tested)
+
+| Agent ID | Type | Framework | LLM | Protocol | Supervisor |
+|----------|------|-----------|-----|----------|------------|
+| `weather_agent` | Custom A2A | LangGraph | No | A2A JSON-RPC | No |
+| `adk_agent` | Custom A2A | Google ADK | LiteMaaS | A2A JSON-RPC | No |
+| `claude_sdk_agent` | Custom A2A | Anthropic SDK | LiteMaaS | A2A JSON-RPC | No |
+| `weather_supervised` | Custom A2A | LangGraph | No | A2A JSON-RPC | Yes (Landlock+netns+OPA) |
+| `openshell_claude` | Builtin sandbox | Claude Code CLI | Anthropic | SSH / kubectl exec | Yes |
+| `openshell_opencode` | Builtin sandbox | OpenCode CLI | OpenAI-compat | SSH / kubectl exec | Yes |
+| `openshell_generic` | Builtin sandbox | None (base image) | N/A | kubectl exec | Yes |
+
+### Test categories
+
+| Category | Tests | What it validates |
+|----------|-------|-------------------|
+| Platform health | 7 | Gateway, operator, agent pods, deployments |
+| Credential isolation | 18 | secretKeyRef, no hardcoded keys, no K8s token leak, policy mounted |
+| A2A conversations | 6 | Weather queries, PR review, code review with real LLM |
+| Multi-turn conversations | 12 | Sequential messages, context isolation, context continuity (all agents) |
+| Conversation survives restart | 8 | Scale-down/up + context check, pod UID changes (all agents) |
+| PVC workspace persistence | 4 | Session state written to PVC (generic, Claude, OpenCode sandboxes) |
+| Sandbox status observability | 5 | Gateway, deployment, pod, sandbox CR status queryable |
+| Agent service persistence | 3 | Responds across connections, stable after delay, no restarts |
+| Supervisor enforcement | 12 | Landlock, netns, seccomp, OPA (weather-agent-supervised) |
+| Skill discovery | 5 | Skills ConfigMap, agent card awareness |
+| Skill execution | 6 | PR review, RCA, security review with real LLM |
+| Builtin sandboxes | 5 | Sandbox CR CRUD, base image, Claude/OpenCode sandbox creation |
+| Sandbox lifecycle | 4 | List, create, delete, gateway processing |
+
+## 13. Phase 2: Kagenti Backend and UI Integration
+
+Phase 2 connects OpenShell sandboxes to the Kagenti management plane. The backend
+API and UI provide session management, observability, and lifecycle control that
+the OpenShell gateway does not have.
+
+### Communication architecture
+
+```mermaid
+graph TB
+    subgraph ui["Kagenti UI"]
+        SC["SandboxPage"]
+        AC["AgentChat"]
+        FB["FileBrowser"]
+        OP["ObservabilityPage"]
+    end
+
+    subgraph backend["Kagenti Backend"]
+        API["FastAPI routes"]
+        SS["Session Store<br/>(PostgreSQL)"]
+        API -->|"stores"| SS
+    end
+
+    subgraph gateway["OpenShell Gateway"]
+        GW["Gateway gRPC API"]
+        ES["ExecSandbox RPC"]
+        CS["CreateSandbox RPC"]
+    end
+
+    subgraph agents["team1"]
+        subgraph a2a_agents["Custom A2A Agents"]
+            WA["weather_agent"]
+            ADK["adk_agent"]
+            CL["claude_sdk_agent"]
+        end
+        subgraph sandboxes["Builtin Sandboxes"]
+            OC["openshell_claude"]
+            OO["openshell_opencode"]
+        end
+    end
+
+    SC -->|"create/manage"| API
+    AC -->|"chat"| API
+    FB -->|"browse workspace"| API
+    API -->|"A2A message/send"| a2a_agents
+    API -->|"ExecSandbox gRPC"| GW
+    API -->|"CreateSandbox gRPC"| GW
+    GW -->|"exec"| sandboxes
+    GW -->|"create pods"| sandboxes
+```
+
+### A2A adapters per agent type
+
+Each agent type needs a different adapter in the Kagenti backend to enable
+unified session management via the UI:
+
+| Agent Type | Backend Adapter | How it works |
+|-----------|----------------|-------------|
+| Custom A2A (weather, ADK, Claude SDK) | **A2A adapter** (already implemented) | Backend sends A2A `message/send` JSON-RPC, stores response in session DB |
+| OpenShell builtin (Claude, OpenCode) | **ExecSandbox adapter** (Phase 2) | Backend calls gateway's `ExecSandbox` gRPC to send prompts, captures stdout, stores in session DB |
+| OpenShell builtin (interactive SSH) | **Terminal adapter** (Phase 3) | Backend bridges WebSocket (xterm.js in UI) to SSH tunnel via gateway gRPC |
+
+### Session persistence architecture
+
+**Context lives in the Kagenti backend, not in the agent.** This is the key
+architectural insight: agents can be stateless because the backend manages
+conversation history.
+
+| Data | Where it lives | Survives pod restart? |
+|------|---------------|----------------------|
+| Conversation history | Kagenti backend PostgreSQL | Yes |
+| Workspace files (code, configs) | PVC mounted at `/workspace` | Yes |
+| Agent in-memory state | Pod memory | No — lost on restart |
+| Agent process (dtach socket) | Pod filesystem | No — lost on restart |
+
+For custom A2A agents, the backend sends `contextId` with each request. For
+builtin sandboxes, the backend re-establishes the session by creating a new
+sandbox with the same PVC and replaying context from PostgreSQL.
+
+### What PR #1318 contributes
+
+[PR #1318](https://github.com/kagenti/kagenti/pull/1318) adds Sandbox CR support
+to the Kagenti backend router (`agents.py`):
+- `_build_sandbox_manifest()` — creates Sandbox CRs with `spec.podTemplate` layout
+- `_is_sandbox_ready()` — status helpers for Sandbox CR state
+- Sandbox as 4th workload type in `list_agents`, `get_agent`, `delete_agent`, `create_agent`
+
+This enables the Kagenti UI (SandboxWizard, SandboxPage) to create and manage
+OpenShell sandboxes through the same API used for Deployment-backed agents.
+
+### What the Kagenti UI already provides (OpenShell has none)
+
+| Capability | Kagenti UI Component | OpenShell Status |
+|-----------|---------------------|-----------------|
+| Sandbox creation wizard | `SandboxWizard` | CLI only |
+| Session graph visualization | `SessionGraphPage`, `TopologyGraphView` | Not available |
+| Agent catalog/discovery | `AgentCatalogPage`, `AgentDetailPage` | Not available |
+| Interactive agent chat | `AgentChat` (A2A) | SSH terminal only |
+| LLM usage tracking | `LlmUsagePanel` | Not available |
+| Pod status monitoring | `PodStatusPanel` | `kubectl` only |
+| Prompt inspection | `PromptInspector` | Not available |
+| Workspace file browsing | `FileBrowser`, `FilePreview` | SSH only |
+| Human-in-the-loop approval | `HitlApprovalCard` | Not available |
+| Build progress tracking | `BuildProgressPage` | Not available |
+
+## 14. TODO: Production Readiness
 
 | Item | Priority | Description |
 |------|----------|-------------|
