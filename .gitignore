@@ -200,4 +200,3 @@ kagenti/kubectl-kagenti/kubectl-kagenti
 .codeql-results-python.sarif
 .cves/
 .claude/scheduled_tasks.lock
-.claude/worktrees/
