@@ -485,3 +485,23 @@ This architecture would enable:
 - Custom compute drivers that don't create netns when not needed
 
 **Impact:** Would resolve Q8.1 and Q8.2 cleanly.
+
+### Q8.4: What upstream PRs exist for our blockers?
+
+**Status:** ANSWERED (2026-04-24 research)
+
+| Blocker | Upstream Status | PR | Notes |
+|---------|----------------|-----|-------|
+| Port exposure for A2A+supervisor | **No PRs** | N/A | PR #867 (merged) removed direct gateway→sandbox; arch is outbound-only |
+| Model ID rewriting | **Closed PR** | #618 | Proposed per-request model aliases; closed. Merged approach: static model binding |
+| Provider injection for Sandbox CRs | **Implemented** | Production | Works when sandbox created via gateway (has OPENSHELL_SANDBOX_ID) |
+| RFC 0001 rearchitecture | **Open** | #836 | Documentation RFC, not feature implementation |
+
+**Key finding:** Provider injection (blocker 3) is already solved upstream.
+Our tests create Sandbox CRs via kubectl which bypasses the gateway. Creating
+via gateway's `CreateSandbox` gRPC would give us credential injection for free.
+
+**Action items:**
+1. Port bridge sidecar: Kagenti contribution (no upstream changes needed)
+2. Model rewriting: Use LiteLLM model aliases as workaround
+3. Sandbox creation: Use gateway `CreateSandbox` gRPC instead of kubectl
