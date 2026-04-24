@@ -511,12 +511,17 @@ EOLITELLM
     fi
 
     # ── Wait for all rollouts to complete ─────────────────────────────
+    # Brief delay to let K8s controller detect the env var changes
+    # and start the rollout before we check status.
+    sleep 5
     log_step "Waiting for agent rollouts to complete..."
     for deploy in $(kubectl get deploy -n team1 -l kagenti.io/type=agent -o name 2>/dev/null); do
         kubectl rollout status "$deploy" -n team1 --timeout=180s 2>/dev/null || {
             log_warn "$deploy rollout not complete"
         }
     done
+    # Extra wait for readiness probes to pass after rollout
+    sleep 5
     kubectl get pods -n team1 -l kagenti.io/type=agent
 else
     log_phase "PHASE 4: Skipping Agent Deployment"
