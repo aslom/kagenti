@@ -300,3 +300,142 @@ def kubectl_get_deployments_json(namespace: str) -> list[dict]:
 
     data = json.loads(result.stdout)
     return data.get("items", [])
+
+
+# ---------------------------------------------------------------------------
+# Canonical test data (shared across all test files)
+# ---------------------------------------------------------------------------
+
+CANONICAL_DIFF = """
+diff --git a/app/handler.py b/app/handler.py
+--- a/app/handler.py
++++ b/app/handler.py
+@@ -15,6 +15,10 @@ def handle_request(request):
+     user_input = request.params.get("query", "")
+-    result = db.execute(f"SELECT * FROM data WHERE id='{user_input}'")
++    result = db.execute("SELECT * FROM data WHERE id=%s", (user_input,))
+     return {"data": result}
++
++def admin_action(request):
++    cmd = request.params.get("cmd")
++    os.system(cmd)  # Run admin command
++    return {"status": "done"}
+"""
+
+CANONICAL_CODE = """
+import pickle, os, subprocess
+
+def load_data(path):
+    return pickle.load(open(path, 'rb'))
+
+def run(cmd):
+    return subprocess.check_output(cmd, shell=True)
+
+def query(name):
+    return db.execute(f"SELECT * FROM users WHERE name='{name}'")
+"""
+
+CANONICAL_CI_LOG = """
+2026-04-22T08:00:00Z Run 12345 — E2E Kind
+2026-04-22T08:01:00Z Installing Kagenti...
+2026-04-22T08:05:00Z ERROR: Pod kagenti-controller-manager CrashLoopBackOff
+2026-04-22T08:05:01Z Back-off restarting failed container
+2026-04-22T08:05:02Z Events: Warning FailedMount — secret "webhook-tls" not found
+2026-04-22T08:05:10Z FAILED: test_platform_health — operator not Running
+"""
+
+# ---------------------------------------------------------------------------
+# Agent registry — defines ALL agents and their properties
+# ---------------------------------------------------------------------------
+
+ALL_A2A_AGENTS = [
+    pytest.param("weather-agent", id="weather_agent"),
+    pytest.param("adk-agent", id="adk_agent"),
+    pytest.param("claude-sdk-agent", id="claude_sdk_agent"),
+    pytest.param("weather-agent-supervised", id="weather_supervised"),
+]
+
+LLM_CAPABLE_AGENTS = {"adk-agent", "claude-sdk-agent"}
+
+ALL_SANDBOX_TYPES = [
+    pytest.param(
+        "test-generic-ws",
+        "session-data-12345",
+        "/workspace/session.txt",
+        "echo 'session-data-12345' > /workspace/session.txt && sleep 300",
+        id="openshell_generic",
+    ),
+    pytest.param(
+        "test-claude-ws",
+        "claude-session-001",
+        "/workspace/.claude/session.json",
+        "mkdir -p /workspace/.claude /workspace/project && "
+        "echo 'session-id: claude-session-001' > /workspace/.claude/session.json && "
+        "echo 'def main(): pass' > /workspace/project/main.py && sleep 300",
+        id="openshell_claude",
+    ),
+    pytest.param(
+        "test-opencode-ws",
+        "opencode-session-001",
+        "/workspace/.opencode/config.txt",
+        "mkdir -p /workspace/.opencode /workspace/project && "
+        "echo session=opencode-session-001 > /workspace/.opencode/config.txt && "
+        "echo hello from opencode > /workspace/project/app.py && sleep 300",
+        id="openshell_opencode",
+    ),
+]
+
+# Agent-specific prompts for multi-turn tests
+AGENT_PROMPTS = {
+    "weather-agent": [
+        "Weather in London?",
+        "Compare that to Paris.",
+        "Which is warmer?",
+    ],
+    "adk-agent": [
+        "I have a Python JSON parser.",
+        "Add error handling.",
+        "Review the result.",
+    ],
+    "claude-sdk-agent": [
+        "Review: def add(a,b): return a+b",
+        "Add type hints.",
+        "Add tests.",
+    ],
+    "weather-agent-supervised": [
+        "Weather in Berlin?",
+        "What about Tokyo?",
+        "Which is colder?",
+    ],
+}
+
+# Map agent name to fixture name (for parametrized tests)
+FIXTURE_MAP = {
+    "weather-agent": "weather_agent_url",
+    "adk-agent": "adk_agent_url",
+    "claude-sdk-agent": "claude_sdk_agent_url",
+}
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers (used across test files)
+# ---------------------------------------------------------------------------
+
+
+def _read_skill(skill_name: str) -> str:
+    """Read a kagenti skill markdown file."""
+    repo_root = os.getenv(
+        "REPO_ROOT",
+        os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."),
+    )
+    skill_path = os.path.join(repo_root, ".claude", "skills", skill_name, "SKILL.md")
+    if not os.path.exists(skill_path):
+        pytest.skip(f"Skill file not found: {skill_path}")
+    with open(skill_path) as f:
+        content = f.read()
+    return content[:2000]
+
+
+def destructive_tests_enabled() -> bool:
+    """Check if destructive tests (restart, delete) are enabled."""
+    return os.getenv("OPENSHELL_DESTRUCTIVE_TESTS", "").lower() == "true"

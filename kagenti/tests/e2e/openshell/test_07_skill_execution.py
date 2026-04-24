@@ -3,6 +3,13 @@ Kagenti Skill Execution Tests
 
 Tests that verify agents can load and execute kagenti skills.
 
+Consolidated from:
+- test_skill_execution.py (all classes)
+- test_adk_agent.py::test_pr_review
+- test_claude_sdk_agent.py::test_code_review
+- test_agent_skills.py skills
+- test_supervisor_enforcement.py::TestRealGitHubPRReview
+
 Skill execution matrix (ALL agent types):
 
 | Agent ID           | Skill Loading          | Execution Method      | Status     |
@@ -17,17 +24,27 @@ Skill execution matrix (ALL agent types):
 """
 
 import os
-import subprocess
 
 import httpx
 import pytest
 
-from kagenti.tests.e2e.openshell.conftest import a2a_send, extract_a2a_text
+from kagenti.tests.e2e.openshell.conftest import (
+    a2a_send,
+    extract_a2a_text,
+    sandbox_crd_installed,
+    CANONICAL_DIFF,
+    CANONICAL_CODE,
+    CANONICAL_CI_LOG,
+    _read_skill,
+)
 
 pytestmark = pytest.mark.openshell
 
 LLM_AVAILABLE = os.getenv("OPENSHELL_LLM_AVAILABLE", "").lower() == "true"
 skip_no_llm = pytest.mark.skipif(not LLM_AVAILABLE, reason="LLM not available")
+skip_no_crd = pytest.mark.skipif(
+    not sandbox_crd_installed(), reason="Sandbox CRD not installed"
+)
 
 REPO_ROOT = os.getenv(
     "REPO_ROOT",
@@ -35,70 +52,15 @@ REPO_ROOT = os.getenv(
 )
 
 
-def _read_skill(skill_name: str) -> str:
-    """Read a kagenti skill markdown file."""
-    skill_path = os.path.join(REPO_ROOT, ".claude", "skills", skill_name, "SKILL.md")
-    if not os.path.exists(skill_path):
-        pytest.skip(f"Skill file not found: {skill_path}")
-    with open(skill_path) as f:
-        content = f.read()
-    return content[:2000]
-
-
-from kagenti.tests.e2e.openshell.conftest import sandbox_crd_installed
-
-skip_no_crd = pytest.mark.skipif(
-    not sandbox_crd_installed(), reason="Sandbox CRD not installed"
-)
-
-
-SAMPLE_PR_DIFF = """
-diff --git a/app/handler.py b/app/handler.py
---- a/app/handler.py
-+++ b/app/handler.py
-@@ -15,6 +15,10 @@ def handle_request(request):
-     user_input = request.params.get("query", "")
--    result = db.execute(f"SELECT * FROM data WHERE id='{user_input}'")
-+    result = db.execute("SELECT * FROM data WHERE id=%s", (user_input,))
-     return {"data": result}
-+
-+def admin_action(request):
-+    cmd = request.params.get("cmd")
-+    os.system(cmd)  # Run admin command
-+    return {"status": "done"}
-"""
-
-SAMPLE_CI_LOG = """
-2026-04-22T08:00:00Z Run 12345 — E2E Kind
-2026-04-22T08:01:00Z Installing Kagenti...
-2026-04-22T08:05:00Z ERROR: Pod kagenti-controller-manager CrashLoopBackOff
-2026-04-22T08:05:01Z Back-off restarting failed container
-2026-04-22T08:05:02Z Events: Warning FailedMount — secret "webhook-tls" not found
-2026-04-22T08:05:10Z FAILED: test_platform_health — operator not Running
-"""
-
-SAMPLE_CODE = """
-import pickle, os, subprocess
-
-def load_data(path):
-    return pickle.load(open(path, 'rb'))
-
-def run(cmd):
-    return subprocess.check_output(cmd, shell=True)
-
-def query(name):
-    return db.execute(f"SELECT * FROM users WHERE name='{name}'")
-"""
-
 # ═══════════════════════════════════════════════════════════════════════════
 # Skill files exist (all agents share this)
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-class TestSkillCompatibilityMatrix:
-    """Document which agents can run which skills."""
+class TestSkillFilesExist:
+    """Verify key kagenti skills exist in the repo."""
 
-    def test_skill_files_exist(self):
+    def test_skill_files__all__key_skills_exist(self):
         """Key kagenti skills must exist in the repo."""
         skills_dir = os.path.join(REPO_ROOT, ".claude", "skills")
         if not os.path.isdir(skills_dir):
@@ -111,7 +73,7 @@ class TestSkillCompatibilityMatrix:
                 f"Skill {skill} not found at {skill_path}"
             )
 
-    def test_skill_directory_has_expected_structure(self):
+    def test_skill_structure__all__skill_md_present(self):
         """Each skill directory must contain a SKILL.md file."""
         skills_dir = os.path.join(REPO_ROOT, ".claude", "skills")
         if not os.path.isdir(skills_dir):
@@ -140,14 +102,16 @@ class TestPRReviewSkill:
     """PR review skill execution across ALL agent types."""
 
     @skip_no_llm
-    async def test_pr_review_claude_sdk_agent(self, claude_sdk_agent_url):
+    async def test_pr_review__claude_sdk_agent__follows_skill_instructions(
+        self, claude_sdk_agent_url
+    ):
         """Claude SDK agent follows pr-review skill instructions."""
         skill = _read_skill("github:pr-review")
         prompt = (
             f"You are executing the following code review skill:\n\n"
             f"```markdown\n{skill[:1000]}\n```\n\n"
             f"Now review this PR diff following the skill's instructions:\n\n"
-            f"```diff\n{SAMPLE_PR_DIFF}\n```"
+            f"```diff\n{CANONICAL_DIFF}\n```"
         )
         async with httpx.AsyncClient() as client:
             resp = await a2a_send(
@@ -167,12 +131,14 @@ class TestPRReviewSkill:
         ), f"Skill execution didn't find security issues: {text[:200]}"
 
     @skip_no_llm
-    async def test_pr_review_adk_agent(self, adk_agent_url):
+    async def test_pr_review__adk_agent__follows_skill_instructions(
+        self, adk_agent_url
+    ):
         """ADK agent follows pr-review skill instructions."""
         skill = _read_skill("github:pr-review")
         prompt = (
             f"Follow these review instructions:\n{skill[:800]}\n\n"
-            f"Review this diff:\n```diff\n{SAMPLE_PR_DIFF}\n```"
+            f"Review this diff:\n```diff\n{CANONICAL_DIFF}\n```"
         )
         async with httpx.AsyncClient() as client:
             resp = await a2a_send(
@@ -186,14 +152,14 @@ class TestPRReviewSkill:
         text = extract_a2a_text(resp)
         assert text and len(text) > 30
 
-    async def test_pr_review_weather_agent(self):
+    async def test_pr_review__weather_agent__no_llm(self):
         """Weather agent cannot execute skills — no LLM."""
         pytest.skip(
             "weather_agent: No LLM — cannot execute PR review skill. "
             "This is by design (weather agent is a pure tool-calling agent)."
         )
 
-    async def test_pr_review_weather_supervised(self):
+    async def test_pr_review__weather_supervised__no_llm(self):
         """Supervised weather agent cannot execute skills — no LLM."""
         pytest.skip(
             "weather_supervised: No LLM — cannot execute PR review skill. "
@@ -201,7 +167,7 @@ class TestPRReviewSkill:
         )
 
     @skip_no_crd
-    async def test_pr_review_openshell_claude(self):
+    async def test_pr_review__openshell_claude__native_skill_execution(self):
         """Claude Code builtin sandbox executes pr-review skill natively."""
         pytest.skip(
             "openshell_claude: Native skill execution requires real Anthropic API key. "
@@ -210,15 +176,16 @@ class TestPRReviewSkill:
         )
 
     @skip_no_crd
-    async def test_pr_review_openshell_opencode(self):
-        """OpenCode builtin sandbox executes pr-review skill via prompt."""
+    async def test_pr_review__openshell_opencode__litemaas_provider(self):
+        """OpenCode builtin sandbox executes pr-review skill via LiteMaaS."""
         pytest.skip(
             "openshell_opencode: Skill execution requires ExecSandbox gRPC adapter. "
             "Backend would inject skill markdown into OpenCode prompt, exec in sandbox. "
-            "TODO: Phase 2 ExecSandbox adapter + LiteMaaS provider on gateway."
+            "TODO: Phase 2 ExecSandbox adapter + LiteMaaS provider on gateway. "
+            "NEW TEST: Use LiteMaaS (OpenAI-compatible) instead of real OpenAI."
         )
 
-    async def test_pr_review_openshell_generic(self):
+    async def test_pr_review__openshell_generic__no_agent(self):
         """Generic sandbox has no agent — cannot execute skills."""
         pytest.skip(
             "openshell_generic: No agent CLI in generic sandbox. "
@@ -236,14 +203,16 @@ class TestRCASkill:
     """RCA (root cause analysis) skill execution across ALL agent types."""
 
     @skip_no_llm
-    async def test_rca_claude_sdk_agent(self, claude_sdk_agent_url):
+    async def test_rca__claude_sdk_agent__follows_skill_instructions(
+        self, claude_sdk_agent_url
+    ):
         """Claude SDK agent follows rca:ci skill instructions."""
         skill = _read_skill("rca:ci")
         prompt = (
             f"You are executing the following RCA skill:\n\n"
             f"```markdown\n{skill[:1000]}\n```\n\n"
             f"Analyze these CI logs following the skill's methodology:\n\n"
-            f"```\n{SAMPLE_CI_LOG}\n```"
+            f"```\n{CANONICAL_CI_LOG}\n```"
         )
         async with httpx.AsyncClient() as client:
             resp = await a2a_send(
@@ -263,12 +232,12 @@ class TestRCASkill:
         ), f"RCA skill didn't identify root cause: {text[:200]}"
 
     @skip_no_llm
-    async def test_rca_adk_agent(self, adk_agent_url):
+    async def test_rca__adk_agent__follows_skill_instructions(self, adk_agent_url):
         """ADK agent follows rca:ci skill instructions."""
         skill = _read_skill("rca:ci")
         prompt = (
             f"Follow these RCA instructions:\n{skill[:800]}\n\n"
-            f"Analyze these CI logs:\n```\n{SAMPLE_CI_LOG}\n```"
+            f"Analyze these CI logs:\n```\n{CANONICAL_CI_LOG}\n```"
         )
         async with httpx.AsyncClient() as client:
             resp = await a2a_send(
@@ -282,16 +251,16 @@ class TestRCASkill:
         text = extract_a2a_text(resp)
         assert text and len(text) > 30
 
-    async def test_rca_weather_agent(self):
+    async def test_rca__weather_agent__no_llm(self):
         """Weather agent cannot execute RCA skill — no LLM."""
         pytest.skip("weather_agent: No LLM — cannot execute RCA skill.")
 
-    async def test_rca_weather_supervised(self):
+    async def test_rca__weather_supervised__no_llm(self):
         """Supervised weather agent cannot execute RCA skill — no LLM."""
         pytest.skip("weather_supervised: No LLM — cannot execute RCA skill.")
 
     @skip_no_crd
-    async def test_rca_openshell_claude(self):
+    async def test_rca__openshell_claude__native_execution(self):
         """Claude Code builtin sandbox executes rca:ci skill natively."""
         pytest.skip(
             "openshell_claude: Native rca:ci execution requires Anthropic API key. "
@@ -299,14 +268,14 @@ class TestRCASkill:
         )
 
     @skip_no_crd
-    async def test_rca_openshell_opencode(self):
-        """OpenCode executes rca:ci skill via prompt injection."""
+    async def test_rca__openshell_opencode__litemaas_provider(self):
+        """OpenCode executes rca:ci skill via prompt injection with LiteMaaS."""
         pytest.skip(
             "openshell_opencode: Requires ExecSandbox adapter + LiteMaaS. "
             "TODO: Phase 2 ExecSandbox adapter."
         )
 
-    async def test_rca_openshell_generic(self):
+    async def test_rca__openshell_generic__no_agent(self):
         """Generic sandbox has no agent — cannot execute RCA skill."""
         pytest.skip("openshell_generic: No agent CLI — cannot execute skills.")
 
@@ -321,12 +290,14 @@ class TestSecurityReviewSkill:
     """Security review skill execution across ALL agent types."""
 
     @skip_no_llm
-    async def test_security_review_claude_sdk_agent(self, claude_sdk_agent_url):
+    async def test_security_review__claude_sdk_agent__follows_skill(
+        self, claude_sdk_agent_url
+    ):
         """Claude SDK agent follows security review skill."""
         skill = _read_skill("test:review")
         prompt = (
             f"Execute this security review skill:\n{skill[:800]}\n\n"
-            f"Review this code:\n```python\n{SAMPLE_CODE}\n```"
+            f"Review this code:\n```python\n{CANONICAL_CODE}\n```"
         )
         async with httpx.AsyncClient() as client:
             resp = await a2a_send(
@@ -350,12 +321,12 @@ class TestSecurityReviewSkill:
         )
 
     @skip_no_llm
-    async def test_security_review_adk_agent(self, adk_agent_url):
+    async def test_security_review__adk_agent__follows_skill(self, adk_agent_url):
         """ADK agent follows security review skill."""
         skill = _read_skill("test:review")
         prompt = (
             f"Follow these security review instructions:\n{skill[:800]}\n\n"
-            f"Review this code:\n```python\n{SAMPLE_CODE}\n```"
+            f"Review this code:\n```python\n{CANONICAL_CODE}\n```"
         )
         async with httpx.AsyncClient() as client:
             resp = await a2a_send(
@@ -369,18 +340,18 @@ class TestSecurityReviewSkill:
         text = extract_a2a_text(resp)
         assert text and len(text) > 30
 
-    async def test_security_review_weather_agent(self):
+    async def test_security_review__weather_agent__no_llm(self):
         """Weather agent cannot execute security review — no LLM."""
         pytest.skip("weather_agent: No LLM — cannot execute security review skill.")
 
-    async def test_security_review_weather_supervised(self):
+    async def test_security_review__weather_supervised__no_llm(self):
         """Supervised weather agent cannot execute security review — no LLM."""
         pytest.skip(
             "weather_supervised: No LLM — cannot execute security review skill."
         )
 
     @skip_no_crd
-    async def test_security_review_openshell_claude(self):
+    async def test_security_review__openshell_claude__native(self):
         """Claude Code builtin sandbox executes security review natively."""
         pytest.skip(
             "openshell_claude: Native security review requires Anthropic API key. "
@@ -388,16 +359,36 @@ class TestSecurityReviewSkill:
         )
 
     @skip_no_crd
-    async def test_security_review_openshell_opencode(self):
+    async def test_security_review__openshell_opencode__litemaas(self):
         """OpenCode executes security review via prompt."""
         pytest.skip(
             "openshell_opencode: Requires ExecSandbox adapter + LiteMaaS. "
             "TODO: Phase 2 ExecSandbox adapter."
         )
 
-    async def test_security_review_openshell_generic(self):
+    async def test_security_review__openshell_generic__no_agent(self):
         """Generic sandbox has no agent — cannot execute skills."""
         pytest.skip("openshell_generic: No agent CLI — cannot execute skills.")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Code Generation skill (placeholder for future)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+class TestCodeGenerationSkill:
+    """Code generation skill execution across ALL agent types."""
+
+    @skip_no_llm
+    async def test_code_generation__claude_sdk_agent__generates_code(
+        self, claude_sdk_agent_url
+    ):
+        """Claude SDK agent generates code from requirements."""
+        pytest.skip(
+            "TODO: Implement code generation skill test. "
+            "Requires: test:write or similar skill in .claude/skills/."
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -410,7 +401,9 @@ class TestRealWorldSkillExecution:
     """Test skill execution with real-world data (GitHub API, CI logs)."""
 
     @skip_no_llm
-    async def test_review_real_github_pr_claude_sdk(self, claude_sdk_agent_url):
+    async def test_real_github_pr__claude_sdk_agent__fetches_and_reviews(
+        self, claude_sdk_agent_url
+    ):
         """Fetch a real PR diff from kagenti repo and review it."""
         gh_token = os.getenv("GITHUB_TOKEN", "")
         headers = {"Accept": "application/vnd.github.v3.diff"}
@@ -441,14 +434,16 @@ class TestRealWorldSkillExecution:
         assert text and len(text) > 50
 
     @skip_no_llm
-    async def test_rca_ci_logs_claude_sdk(self, claude_sdk_agent_url):
+    async def test_rca_ci_logs__claude_sdk_agent__identifies_root_cause(
+        self, claude_sdk_agent_url
+    ):
         """Send CI-style error logs and ask agent for root cause analysis."""
         async with httpx.AsyncClient() as client:
             resp = await a2a_send(
                 client,
                 claude_sdk_agent_url,
                 f"Analyze these CI logs and identify the root cause:\n\n"
-                f"```\n{SAMPLE_CI_LOG}\n```",
+                f"```\n{CANONICAL_CI_LOG}\n```",
                 request_id="rca-logs",
                 timeout=120.0,
             )
@@ -462,7 +457,7 @@ class TestRealWorldSkillExecution:
         ), f"Response doesn't identify root cause: {text[:200]}"
 
     @skip_no_llm
-    async def test_review_real_github_pr_adk(self, adk_agent_url):
+    async def test_real_github_pr__adk_agent__fetches_and_reviews(self, adk_agent_url):
         """ADK agent reviews real GitHub PR."""
         gh_token = os.getenv("GITHUB_TOKEN", "")
         headers = {"Accept": "application/vnd.github.v3.diff"}
@@ -492,7 +487,7 @@ class TestRealWorldSkillExecution:
         assert text and len(text) > 30
 
     @skip_no_crd
-    async def test_real_github_pr_openshell_claude(self):
+    async def test_real_github_pr__openshell_claude__native_clone_and_review(self):
         """Claude Code sandbox reviews real PR natively."""
         pytest.skip(
             "openshell_claude: Would clone repo and run `claude /review` natively. "
@@ -501,10 +496,43 @@ class TestRealWorldSkillExecution:
         )
 
     @skip_no_crd
-    async def test_real_github_pr_openshell_opencode(self):
-        """OpenCode sandbox reviews real PR."""
+    async def test_real_github_pr__openshell_opencode__litemaas_review(self):
+        """OpenCode sandbox reviews real PR via LiteMaaS."""
         pytest.skip(
-            "openshell_opencode: Would clone repo and review via OpenCode. "
+            "openshell_opencode: Would clone repo and review via OpenCode + LiteMaaS. "
             "Requires ExecSandbox adapter + LiteMaaS provider. "
             "TODO: Phase 2 ExecSandbox adapter."
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Builtin Sandbox CLIs (openshell_claude, openshell_opencode)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestBuiltinSandboxCLIs:
+    """Verify builtin sandbox images have expected CLI tools."""
+
+    @skip_no_crd
+    def test_builtin_cli__openshell_claude__claude_binary_present(self):
+        """Claude Code sandbox must have `claude` binary."""
+        pytest.skip(
+            "openshell_claude: Verify via kubectl exec into openshell_claude sandbox. "
+            "TODO: Create sandbox + kubectl exec -- which claude"
+        )
+
+    @skip_no_crd
+    def test_builtin_cli__openshell_opencode__opencode_binary_present(self):
+        """OpenCode sandbox must have `opencode` binary."""
+        pytest.skip(
+            "openshell_opencode: Verify via kubectl exec into openshell_opencode sandbox. "
+            "TODO: Create sandbox + kubectl exec -- which opencode"
+        )
+
+    @skip_no_crd
+    def test_builtin_cli__openshell_generic__has_bash_and_tools(self):
+        """Generic sandbox must have bash, git, curl."""
+        pytest.skip(
+            "openshell_generic: Verify via kubectl exec into openshell_generic sandbox. "
+            "TODO: Create sandbox + kubectl exec -- bash -c 'which git curl'"
         )
