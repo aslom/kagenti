@@ -538,3 +538,29 @@ via gateway's `CreateSandbox` gRPC would give us credential injection for free.
 1. Port bridge sidecar: Kagenti contribution (no upstream changes needed)
 2. Model rewriting: Use LiteLLM model aliases as workaround
 3. Sandbox creation: Use gateway `CreateSandbox` gRPC instead of kubectl
+
+### Q8.5: How to enable OpenCode skill execution in builtin sandboxes?
+
+**Status:** INVESTIGATING — path identified, needs LiteLLM deployment
+
+OpenCode validates model names against a hardcoded client-side list.
+`llama-scout-17b` is not in the list. The solution:
+
+1. Deploy LiteLLM in the cluster with model aliases
+   (`gpt-4o-mini` → `llama-scout-17b` on LiteMaaS)
+2. Sandbox gets virtual key from `litellm-virtual-keys` (secretKeyRef)
+3. Sandbox `OPENAI_BASE_URL` points to `http://litellm.team1.svc:4000/v1`
+4. OpenCode uses `openai/gpt-4o-mini` (in its known model list)
+5. LiteLLM maps to LiteMaaS backend with real API key
+6. Agent never sees the real LiteMaaS key — zero-secret for agent
+
+**What's needed:**
+- Add LiteLLM to the openshell fulltest deployment (ConfigMap + Deployment + Service)
+- Configure model aliases in LiteLLM config
+- Handle Istio ambient mTLS (LiteLLM pod needs mesh labels)
+- Update sandbox creation to include `OPENAI_API_KEY` + `OPENAI_BASE_URL`
+
+**Verified:** LiteLLM proxy with model aliases works (tested via port-forward).
+Blocked by Istio ambient mTLS — LiteLLM needs proper mesh integration.
+
+**Related:** Q3.1 (inference routing), Q2.3 (credential model), Q1.1 (Tier 1)
