@@ -355,14 +355,15 @@ if [ "$SKIP_AGENTS" = "false" ]; then
         done
     fi
 
+    # Create dedicated SA for supervised agents (all platforms)
+    kubectl create serviceaccount openshell-supervisor -n team1 --dry-run=client -o yaml | kubectl apply -f - 2>/dev/null || true
+
     if [ "$PLATFORM" = "ocp" ]; then
         # Gateway needs UID 1000 (anyuid)
         log_step "Granting SCCs for OpenShell agents..."
         oc adm policy add-scc-to-user anyuid -z openshell-gateway -n openshell-system 2>/dev/null || true
         # Supervised agent needs privileged (Landlock + mount --make-shared)
         oc adm policy add-scc-to-user privileged -z openshell-supervisor -n team1 2>/dev/null || true
-        # Create SA if it doesn't exist (the supervised agent deployment should use this SA)
-        kubectl create serviceaccount openshell-supervisor -n team1 --dry-run=client -o yaml | kubectl apply -f - 2>/dev/null || true
     fi
 
     # ── Apply agent manifests FIRST ────────────────────────────────
