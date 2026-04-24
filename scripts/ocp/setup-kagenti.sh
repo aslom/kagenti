@@ -567,6 +567,10 @@ EOF
     log_info "MLflow OTEL values: otel.mlflow.enabled=true, endpoint=${MLFLOW_TRACES_ENDPOINT}"
   fi
 
+  # Keycloak public URL is needed by the realm-init audience mapper.
+  # Construct from DOMAIN (known since Step 2) so it's correct on first install.
+  local _kc_public_url="https://keycloak-${KC_NAMESPACE}.${DOMAIN}"
+
   if helm status kagenti-deps -n kagenti-system &>/dev/null; then
     # Upgrade path: skip hooks (the kiali hook will fail on any cluster where
     # cluster-monitoring-config is managed by another operator)
@@ -574,6 +578,7 @@ EOF
     run_cmd helm upgrade kagenti-deps "$KAGENTI_REPO/charts/kagenti-deps/" \
       -n kagenti-system \
       --set spire.trustDomain="${DOMAIN}" \
+      --set "keycloak.publicUrl=${_kc_public_url}" \
       --set components.kiali.enabled=false \
       --set components.rhoai.enabled=true \
       --set components.mlflow.enabled=false \
@@ -596,6 +601,7 @@ EOF
   run_cmd helm install kagenti-deps "$KAGENTI_REPO/charts/kagenti-deps/" \
     -n kagenti-system --create-namespace \
     --set spire.trustDomain="${DOMAIN}" \
+    --set "keycloak.publicUrl=${_kc_public_url}" \
     --set components.kiali.enabled=false \
     --set components.rhoai.enabled=true \
     --set components.mlflow.enabled=false \
@@ -918,6 +924,24 @@ fi
 
 log_info "Keycloak: realm=$KC_REALM namespace=$KC_NAMESPACE"
 
+# Read the actual Keycloak admin credentials from the operator-managed secret.
+# The RHBK operator creates keycloak-initial-admin with a random password.
+# The kagenti chart creates keycloak-admin-secret in agent namespaces for the
+# client-registration sidecar — these must match, otherwise client-registration
+# can't authenticate to the master realm to register per-agent OAuth clients.
+KC_ADMIN_FLAGS=()
+_kc_admin_user=$($KUBECTL get secret keycloak-initial-admin -n "$KC_NAMESPACE" \
+  -o jsonpath='{.data.username}' 2>/dev/null | base64 -d 2>/dev/null || echo "")
+_kc_admin_pass=$($KUBECTL get secret keycloak-initial-admin -n "$KC_NAMESPACE" \
+  -o jsonpath='{.data.password}' 2>/dev/null | base64 -d 2>/dev/null || echo "")
+if [ -n "$_kc_admin_user" ] && [ -n "$_kc_admin_pass" ]; then
+  KC_ADMIN_FLAGS+=(--set "keycloak.adminUsername=${_kc_admin_user}")
+  KC_ADMIN_FLAGS+=(--set "keycloak.adminPassword=${_kc_admin_pass}")
+  log_success "Keycloak admin credentials read from keycloak-initial-admin"
+else
+  log_warn "Could not read keycloak-initial-admin — agent client-registration may fail"
+fi
+
 # Build operator image override flags
 OPERATOR_IMAGE_FLAGS=()
 if [ -n "$OPERATOR_IMAGE" ]; then
@@ -936,6 +960,7 @@ run_cmd helm upgrade --install kagenti "$KAGENTI_REPO/charts/kagenti/" \
   -f "$SECRETS_FILE" \
   "${KAGENTI_UI_FLAGS[@]}" \
   "${OPERATOR_IMAGE_FLAGS[@]}" \
+  "${KC_ADMIN_FLAGS[@]}" \
   --set "agentOAuthSecret.spiffePrefix=spiffe://${DOMAIN}/sa" \
   --set uiOAuthSecret.useServiceAccountCA=false \
   --set agentOAuthSecret.useServiceAccountCA=false \
