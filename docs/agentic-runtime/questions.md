@@ -133,7 +133,7 @@ However, we use `privileged: true` SCC, not the reduced capability set.
 
 ### Q2.3: K8s Secrets (Kagenti) vs placeholder tokens (OpenShell)?
 
-**Status:** OPEN
+**Status:** OPEN | **Related:** Q1.1 (3-tier model), Q8.1 (port bridge), Q8.3 (rearchitecture)
 
 Two credential models exist:
 - **Kagenti:** API keys in K8s Secrets, injected via `secretKeyRef`
@@ -163,7 +163,7 @@ the supervised agent. Three tests: deny unauthorized, allow authorized, log deni
 
 ### Q3.1: OpenShell inference router vs Kagenti LiteLLM — which is canonical?
 
-**Status:** OPEN
+**Status:** OPEN | **Related:** Q8.2 (model validation), Q1.1 (tier determines routing)
 
 Both route LLM traffic. OpenShell's inference router strips credentials and injects
 backend keys. Kagenti's LiteLLM provides model routing, virtual keys, and budget tracking.
@@ -210,7 +210,7 @@ Test: `test_pr_review__openshell_opencode__litemaas_provider`
 
 ### Q4.1: How should multi-turn context work for A2A agents?
 
-**Status:** OPEN — highest priority for test coverage
+**Status:** OPEN — highest priority for test coverage | **Related:** Q7.3 (testing hurdle)
 
 No A2A agent currently preserves context across requests. The ADK agent returns
 `contextId` but creates a new one per request (upstream ADK gap).
@@ -388,7 +388,7 @@ has `OPENAI_API_KEY` + `OPENAI_BASE_URL` env vars set by the fulltest script.
 
 ### Q7.3: How to test context continuity without backend session store?
 
-**Status:** BLOCKED (needs Kagenti backend work)
+**Status:** BLOCKED (needs Kagenti backend work) | **Related:** Q4.1 (architecture decision)
 
 No agent preserves contextId across requests. The ADK agent creates a new contextId
 per request (upstream `to_a2a()` behavior).
@@ -479,7 +479,7 @@ because they kill session-scoped port-forward fixtures.
 
 ### Q8.1: Can custom A2A agents use OpenShell credential management today?
 
-**Status:** BLOCKED (needs upstream `--expose-port` or port bridge sidecar)
+**Status:** BLOCKED (needs port bridge sidecar) | **Related:** Q1.1 (Tier 2), Q2.3 (credential model)
 
 Custom A2A agents (ADK, Claude SDK) need to be accessible via K8s Service
 on port 8080. The supervisor's netns blocks this. Two solutions:

@@ -6,7 +6,7 @@
 > **Framework:** OpenCode CLI (open-source)
 > **LLM:** OpenAI-compatible (works with LiteMaaS)
 > **Supervisor:** Yes (all protection layers active)
-> **Sandbox Model:** Mode 2 (OpenShell Sandbox CR)
+> **Sandbox Model:** Tier 1 (OpenShell Sandbox CR, full supervisor)
 > **Status:** Sandbox CR tested, LLM execution investigating (LiteMaaS compatible)
 
 ## 1. Overview

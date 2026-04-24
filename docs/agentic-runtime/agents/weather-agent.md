@@ -6,7 +6,7 @@
 > **Framework:** LangGraph + MCP
 > **LLM:** None (pure tool-calling)
 > **Supervisor:** No
-> **Sandbox Model:** Mode 1 (Kagenti Deployment)
+> **Sandbox Model:** Tier 3 (plain Deployment, no supervisor)
 > **Status:** Deployed, tested (Kind + HyperShift)
 
 ## 1. Overview

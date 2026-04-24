@@ -69,11 +69,22 @@ graph TB
 | Budget Proxy | `team1` | LLM token budget enforcement |
 | PostgreSQL | `team1` | Sessions + budget databases |
 
-## 3. Two Agent Deployment Modes
+## 3. Agent Deployment Tiers
 
 > **Detail:** [sandboxing-models.md](sandboxing-models.md) | **Per-agent:** [agents/README.md](agents/README.md) (detailed) | [agents.md](agents.md) (deployment quick-ref)
+> **Open questions:** [questions.md](questions.md) Q1.1 — 3-tier architecture, Q2.3 — credential models, Q8.1 — port bridge
 
-Kagenti supports two agent deployment modes that coexist:
+Kagenti supports three deployment tiers for agents, from simplest to most secure.
+The upgrade path is additive — Tier 3 agents work today and can be upgraded to
+Tier 2/1 incrementally without breaking existing functionality.
+
+| Tier | Deployment | Supervisor | Credentials | OPA Egress | Agent Access | Example |
+|------|-----------|-----------|-------------|-----------|-------------|---------|
+| **Tier 3** | K8s Deployment | No | K8s Secrets (secretKeyRef) | Policy mounted, not enforced | A2A direct | weather, adk, claude_sdk |
+| **Tier 2** | Deployment + supervisor + port bridge | Yes (all layers) | Gateway provider injection | Yes (netns + OPA proxy) | A2A via port bridge | weather_supervised |
+| **Tier 1** | Sandbox CR via gateway | Yes (all layers) | Gateway provider injection | Yes (netns + OPA proxy) | SSH / ExecSandbox | openshell_claude, openshell_opencode |
+
+The three tiers coexist in the same namespace:
 
 ### Mode 1: Custom Agents (Kagenti-managed)
 
@@ -157,7 +168,7 @@ Custom agents use A2A protocol; built-in sandboxes use SSH/exec.
 
 > **Detail:** [sandboxing-layers.md](sandboxing-layers.md) — supervisor, Landlock, seccomp, netns, OPA, credential isolation, LLM compatibility
 > **Conversations & HITL:** [conversation-and-hitl.md](conversation-and-hitl.md) — multi-turn models, session persistence, HITL levels
-> **Pending questions:** [questions.md](questions.md) — 25 questions with investigation paths and test impact
+> **Pending questions:** [questions.md](questions.md) — 28 questions with investigation paths and test impact
 
 Each agent pod uses the OpenShell supervisor as the container entrypoint:
 

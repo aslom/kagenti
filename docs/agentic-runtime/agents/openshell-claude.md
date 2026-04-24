@@ -6,7 +6,7 @@
 > **Framework:** Claude Code CLI (Anthropic)
 > **LLM:** Anthropic API (requires real API key)
 > **Supervisor:** Yes (all protection layers active)
-> **Sandbox Model:** Mode 2 (OpenShell Sandbox CR)
+> **Sandbox Model:** Tier 1 (OpenShell Sandbox CR, full supervisor)
 > **Status:** Sandbox CR tested, LLM execution blocked (needs Anthropic key)
 
 ## 1. Overview

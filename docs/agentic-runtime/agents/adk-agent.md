@@ -6,7 +6,7 @@
 > **Framework:** Google ADK + LiteLLM
 > **LLM:** LiteMaaS (llama-scout-17b)
 > **Supervisor:** No
-> **Sandbox Model:** Mode 1 (Kagenti Deployment)
+> **Sandbox Model:** Tier 3 (plain Deployment, no supervisor)
 > **Status:** Deployed, tested (Kind + HyperShift)
 
 ## 1. Overview

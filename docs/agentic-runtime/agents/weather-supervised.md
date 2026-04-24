@@ -6,7 +6,7 @@
 > **Framework:** LangGraph + OpenShell Supervisor
 > **LLM:** None
 > **Supervisor:** Yes (Landlock + seccomp + netns + OPA)
-> **Sandbox Model:** Mode 1 + Supervisor (Kagenti Deployment with supervisor entrypoint)
+> **Sandbox Model:** Tier 2 (Deployment with supervisor — reference implementation)
 > **Status:** Deployed, tested — all 4 protection layers verified
 
 ## 1. Overview
