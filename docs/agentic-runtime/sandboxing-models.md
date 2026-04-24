@@ -101,3 +101,52 @@ graph TB
 Both modes share the same namespace, LLM routing (LiteMaaS/Budget Proxy),
 and Istio mesh. Custom agents use A2A protocol; builtin sandboxes use
 SSH/exec, with the Kagenti backend serving as the unified session manager.
+
+## Target: Unified Supervisor for ALL Agents
+
+The ideal architecture runs ALL agents under the OpenShell supervisor for
+both egress control and zero-secret credential management.
+
+**Current blocker:** The supervisor creates a network namespace that blocks
+`kubectl port-forward` and K8s Service routing to the agent port. A2A
+tests and production traffic cannot reach the agent.
+
+**Solution: Port bridge sidecar**
+
+```mermaid
+graph LR
+    subgraph Pod["Agent Pod"]
+        subgraph netns["Supervisor netns"]
+            Agent["Agent :8080<br/>(10.200.0.2)"]
+            OPA["OPA Proxy :3128<br/>(10.200.0.1)"]
+        end
+        Bridge["socat sidecar<br/>:8080 → 10.200.0.2:8080"]
+    end
+    Svc["K8s Service :8080"] --> Bridge
+    Bridge --> Agent
+    Agent -->|"egress via proxy"| OPA
+```
+
+```yaml
+# Sidecar bridges pod network → netns agent port
+containers:
+- name: port-bridge
+  image: alpine/socat
+  command: ["socat", "TCP-LISTEN:8080,fork,reuseaddr", "TCP:10.200.0.2:8080"]
+  ports:
+  - containerPort: 8080
+```
+
+**Benefits of unified supervisor:**
+- Zero-secret credential injection for ALL agents (gateway provider store)
+- OPA egress control on ALL agents (not just supervised variant)
+- Landlock filesystem isolation on ALL agents
+- Seccomp syscall filtering on ALL agents
+- Single credential management plane (OpenShell gateway)
+- No K8s Secrets needed for agent API keys
+
+**What's needed:**
+1. Port bridge sidecar (simple socat container) — **can implement now**
+2. Supervisor binary delivery via init container (proposal's Option C)
+3. Test that A2A works through the bridge
+4. OR: upstream OpenShell `--expose-port` flag for native reverse proxy
