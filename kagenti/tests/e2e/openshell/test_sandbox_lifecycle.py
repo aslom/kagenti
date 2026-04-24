@@ -255,7 +255,7 @@ class TestSandboxStatusObservability:
 
     def test_sandbox_cr_status_queryable(self):
         """Sandbox CRs expose status fields when created."""
-        if not _sandbox_crd_installed():
+        if not sandbox_crd_installed():
             pytest.skip("Sandbox CRD not installed")
 
         result = _kubectl(
