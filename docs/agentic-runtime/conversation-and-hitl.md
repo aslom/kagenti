@@ -249,7 +249,7 @@ sequenceDiagram
 
 | Test | Agent | Status | What it validates |
 |------|-------|--------|-------------------|
-| Session written to PVC | openshell_generic, _claude, _opencode | PASS | Data persists on PVC |
+| Session written to PVC | openshell generic, claude, opencode | PASS | Data persists on PVC |
 | PVC survives sandbox deletion | ALL sandbox types | PASS | PVC independent of CR |
 | Workspace restore after restart | openshell_* | TODO Phase 2 | Backend loads workspace + DB history |
 | File browser reads PVC | openshell_* | TODO Phase 2 | Kagenti UI FileBrowser browses PVC |
