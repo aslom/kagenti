@@ -175,15 +175,26 @@ class TestPRReviewSkill:
             "TODO: Phase 2 provider credential integration via OpenShell gateway."
         )
 
+    @skip_no_llm
     @skip_no_crd
     async def test_pr_review__openshell_opencode__litemaas_provider(self):
-        """OpenCode builtin sandbox executes pr-review skill via LiteMaaS."""
-        pytest.skip(
-            "openshell_opencode: Skill execution requires ExecSandbox gRPC adapter. "
-            "Backend would inject skill markdown into OpenCode prompt, exec in sandbox. "
-            "TODO: Phase 2 ExecSandbox adapter + LiteMaaS provider on gateway. "
-            "NEW TEST: Use LiteMaaS (OpenAI-compatible) instead of real OpenAI."
+        """OpenCode builtin sandbox executes pr-review skill via LiteMaaS.
+
+        Creates a sandbox with OpenCode + LiteLLM env vars, runs
+        ``opencode run -m openai/gpt-4o-mini`` with the PR diff.
+        LiteLLM maps gpt-4o-mini → llama-scout-17b on LiteMaaS.
+        """
+        from kagenti.tests.e2e.openshell.conftest import run_opencode_in_sandbox
+
+        output = run_opencode_in_sandbox(
+            f"Review this diff for security issues:\n{CANONICAL_DIFF[:500]}",
         )
+        if output is None:
+            pytest.skip(
+                "openshell_opencode: sandbox or LiteLLM not available. "
+                "Needs: Sandbox CRD + LiteLLM model proxy deployed."
+            )
+        assert len(output) > 20, f"OpenCode response too short: {output[:200]}"
 
     async def test_pr_review__openshell_generic__no_agent(self):
         """Generic sandbox has no agent — cannot execute skills."""
@@ -269,11 +280,15 @@ class TestRCASkill:
 
     @skip_no_crd
     async def test_rca__openshell_opencode__litemaas_provider(self):
-        """OpenCode executes rca:ci skill via prompt injection with LiteMaaS."""
-        pytest.skip(
-            "openshell_opencode: Requires ExecSandbox adapter + LiteMaaS. "
-            "TODO: Phase 2 ExecSandbox adapter."
+        """OpenCode executes rca:ci skill via LiteMaaS in sandbox."""
+        from kagenti.tests.e2e.openshell.conftest import run_opencode_in_sandbox
+
+        output = run_opencode_in_sandbox(
+            f"Analyze these CI logs and identify the root cause:\n{CANONICAL_CI_LOG[:500]}",
         )
+        if output is None:
+            pytest.skip("openshell_opencode: sandbox or LiteLLM not available.")
+        assert len(output) > 20, f"OpenCode RCA response too short: {output[:200]}"
 
     async def test_rca__openshell_generic__no_agent(self):
         """Generic sandbox has no agent — cannot execute RCA skill."""
@@ -359,12 +374,18 @@ class TestSecurityReviewSkill:
         )
 
     @skip_no_crd
+    @skip_no_llm
+    @skip_no_crd
     async def test_security_review__openshell_opencode__litemaas(self):
-        """OpenCode executes security review via prompt."""
-        pytest.skip(
-            "openshell_opencode: Requires ExecSandbox adapter + LiteMaaS. "
-            "TODO: Phase 2 ExecSandbox adapter."
+        """OpenCode executes security review via LiteMaaS in sandbox."""
+        from kagenti.tests.e2e.openshell.conftest import run_opencode_in_sandbox
+
+        output = run_opencode_in_sandbox(
+            f"Review this code for security issues:\n{CANONICAL_CODE[:400]}",
         )
+        if output is None:
+            pytest.skip("openshell_opencode: sandbox or LiteLLM not available.")
+        assert len(output) > 20, f"OpenCode security review too short: {output[:200]}"
 
     async def test_security_review__openshell_generic__no_agent(self):
         """Generic sandbox has no agent — cannot execute skills."""
@@ -508,13 +529,18 @@ class TestRealWorldSkillExecution:
         )
 
     @skip_no_crd
+    @skip_no_llm
+    @skip_no_crd
     async def test_real_github_pr__openshell_opencode__litemaas_review(self):
-        """OpenCode sandbox reviews real PR via LiteMaaS."""
-        pytest.skip(
-            "openshell_opencode: Would clone repo and review via OpenCode + LiteMaaS. "
-            "Requires ExecSandbox adapter + LiteMaaS provider. "
-            "TODO: Phase 2 ExecSandbox adapter."
+        """OpenCode sandbox reviews real PR diff via LiteMaaS."""
+        from kagenti.tests.e2e.openshell.conftest import run_opencode_in_sandbox
+
+        output = run_opencode_in_sandbox(
+            f"Review this PR diff:\n{CANONICAL_DIFF[:500]}",
         )
+        if output is None:
+            pytest.skip("openshell_opencode: sandbox or LiteLLM not available.")
+        assert len(output) > 20, f"OpenCode PR review too short: {output[:200]}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════

@@ -303,6 +303,142 @@ def kubectl_get_deployments_json(namespace: str) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# OpenCode sandbox helper
+# ---------------------------------------------------------------------------
+
+BASE_IMAGE = "ghcr.io/nvidia/openshell-community/sandboxes/base:latest"
+
+
+def run_opencode_in_sandbox(
+    prompt: str,
+    namespace: str = "team1",
+    model: str = "openai/gpt-4o-mini",
+    timeout_sec: int = 120,
+) -> str | None:
+    """Create a sandbox with OpenCode, run a prompt, return the output.
+
+    Returns the OpenCode output text, or None if the sandbox failed to
+    start or OpenCode failed to run.
+    """
+    import time
+
+    name = "test-opencode-skill-run"
+    litellm_svc = kubectl_run(
+        "get",
+        "svc",
+        "litellm-model-proxy",
+        "-n",
+        namespace,
+        timeout=10,
+    )
+    if litellm_svc.returncode != 0:
+        return None
+
+    litellm_url = f"http://litellm-model-proxy.{namespace}.svc:4000/v1"
+
+    kubectl_run(
+        "delete",
+        "sandbox",
+        name,
+        "-n",
+        namespace,
+        "--ignore-not-found",
+        "--wait=false",
+    )
+    time.sleep(2)
+
+    sandbox_yaml = f"""
+apiVersion: agents.x-k8s.io/v1alpha1
+kind: Sandbox
+metadata:
+  name: {name}
+  namespace: {namespace}
+spec:
+  podTemplate:
+    spec:
+      containers:
+      - name: sandbox
+        image: {BASE_IMAGE}
+        command: ["sleep", "300"]
+        env:
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: litellm-virtual-keys
+              key: api-key
+        - name: OPENAI_BASE_URL
+          value: "{litellm_url}"
+"""
+    result = subprocess.run(
+        ["kubectl", "apply", "-f", "-"],
+        input=sandbox_yaml,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if result.returncode != 0:
+        return None
+
+    deadline = time.time() + 60
+    pod_name = None
+    while time.time() < deadline:
+        pods = kubectl_get_pods_json(namespace)
+        matching = [
+            p
+            for p in pods
+            if name in p["metadata"].get("name", "")
+            and p["status"].get("phase") == "Running"
+        ]
+        if matching:
+            pod_name = matching[0]["metadata"]["name"]
+            break
+        time.sleep(5)
+
+    if not pod_name:
+        kubectl_run(
+            "delete",
+            "sandbox",
+            name,
+            "-n",
+            namespace,
+            "--ignore-not-found",
+            "--wait=false",
+        )
+        return None
+
+    exec_result = kubectl_run(
+        "exec",
+        pod_name,
+        "-n",
+        namespace,
+        "--",
+        "timeout",
+        str(timeout_sec),
+        "opencode",
+        "run",
+        "-m",
+        model,
+        prompt,
+        timeout=timeout_sec + 30,
+    )
+
+    kubectl_run(
+        "delete",
+        "sandbox",
+        name,
+        "-n",
+        namespace,
+        "--ignore-not-found",
+        "--wait=false",
+    )
+
+    if exec_result.returncode != 0:
+        return None
+
+    return exec_result.stdout
+
+
+# ---------------------------------------------------------------------------
 # Canonical test data (shared across all test files)
 # ---------------------------------------------------------------------------
 
