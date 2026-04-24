@@ -1,5 +1,7 @@
 # ADK Agent (Google Agent Development Kit)
 
+> Back to [agent catalog](README.md) | [main doc](../openshell-integration.md)
+
 > **Type:** Custom A2A
 > **Framework:** Google ADK + LiteLLM
 > **LLM:** LiteMaaS (llama-scout-17b)

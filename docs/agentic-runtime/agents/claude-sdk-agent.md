@@ -1,5 +1,7 @@
 # Claude SDK Agent
 
+> Back to [agent catalog](README.md) | [main doc](../openshell-integration.md)
+
 > **Type:** Custom A2A
 > **Framework:** Anthropic SDK / OpenAI-compatible (httpx)
 > **LLM:** LiteMaaS (llama-scout-17b)

@@ -26,14 +26,14 @@ capabilities, Kagenti integration points, and testing status.
 | [openshell-claude.md](openshell-claude.md) | Builtin | Claude Code CLI | Anthropic | Yes | Sandbox CR tested |
 | [openshell-opencode.md](openshell-opencode.md) | Builtin | OpenCode CLI | OpenAI-compat | Yes | Sandbox CR tested |
 
-### Future agents (planned)
+### Future agents (planned — docs not yet written)
 
-| Agent Doc | Type | Framework | Notes |
-|-----------|------|-----------|-------|
-| [openshell-codex.md](openshell-codex.md) | Builtin | OpenAI Codex | Needs real OpenAI key |
-| [openshell-copilot.md](openshell-copilot.md) | Builtin | GitHub Copilot | Needs GitHub subscription |
-| [future-langgraph.md](future-langgraph.md) | Custom A2A | LangGraph (complex) | Multi-node graph agents |
-| [future-crewai.md](future-crewai.md) | Custom A2A | CrewAI | Multi-agent crew orchestration |
+| Agent | Type | Framework | Notes |
+|-------|------|-----------|-------|
+| openshell_codex | Builtin | OpenAI Codex | Needs real OpenAI key |
+| openshell_copilot | Builtin | GitHub Copilot | Needs GitHub subscription |
+| langgraph_complex | Custom A2A | LangGraph (multi-node) | Multi-node graph agents |
+| crewai_crew | Custom A2A | CrewAI | Multi-agent crew orchestration |
 
 ## Standard Document Format
 

@@ -1,5 +1,7 @@
 # OpenShell OpenCode Sandbox
 
+> Back to [agent catalog](README.md) | [main doc](../openshell-integration.md)
+
 > **Type:** Builtin Sandbox
 > **Framework:** OpenCode CLI (open-source)
 > **LLM:** OpenAI-compatible (works with LiteMaaS)

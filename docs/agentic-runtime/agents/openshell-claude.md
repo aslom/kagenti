@@ -1,5 +1,7 @@
 # OpenShell Claude Code Sandbox
 
+> Back to [agent catalog](README.md) | [main doc](../openshell-integration.md)
+
 > **Type:** Builtin Sandbox
 > **Framework:** Claude Code CLI (Anthropic)
 > **LLM:** Anthropic API (requires real API key)

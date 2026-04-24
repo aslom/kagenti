@@ -1,5 +1,7 @@
 # Weather Agent (Supervised)
 
+> Back to [agent catalog](README.md) | [main doc](../openshell-integration.md)
+
 > **Type:** Custom A2A
 > **Framework:** LangGraph + OpenShell Supervisor
 > **LLM:** None

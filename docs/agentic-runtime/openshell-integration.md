@@ -95,7 +95,7 @@ graph LR
 ### Mode 2: Built-in Sandboxes (OpenShell-managed)
 
 Pre-installed CLI agents created via OpenShell gateway. The base sandbox
-image (`ghcr.io/nvidia/openshell-community/sandboxes/base:latest`, ~620MB)
+image (`ghcr.io/nvidia/openshell-community/sandboxes/base:latest`, ~1.1GB)
 includes Claude CLI, OpenCode, Codex, Copilot, Python, Node.js, git.
 
 ```mermaid
@@ -153,7 +153,7 @@ Custom agents use A2A protocol; built-in sandboxes use SSH/exec.
 
 ---
 
-## 5. Sandboxing Layers
+## 4. Sandboxing Layers
 
 > **Detail:** [sandboxing-layers.md](sandboxing-layers.md) — supervisor, Landlock, seccomp, netns, OPA, credential isolation, LLM compatibility
 > **Conversations & HITL:** [conversation-and-hitl.md](conversation-and-hitl.md) — multi-turn models, session persistence, HITL levels
@@ -168,10 +168,12 @@ Each agent pod uses the OpenShell supervisor as the container entrypoint:
 5. Drops all capabilities
 6. Execs the agent process as a restricted child
 
-The agent inherits kernel-enforced isolation for its entire lifetime. Normal pod
-networking is preserved (no network namespace in PoC), so Istio mesh works unchanged.
+The agent inherits kernel-enforced isolation for its entire lifetime.
+Non-supervised agents preserve normal pod networking (Istio mesh works unchanged).
+The `weather-agent-supervised` agent enables all layers including network namespace
+isolation (veth pair 10.200.0.1/10.200.0.2).
 
-## 6. Credential Isolation
+## 5. Credential Isolation
 
 OpenShell implements zero-secret credential isolation. Agent env vars contain
 **placeholder tokens** (`openshell:resolve:env:API_KEY`), not real secrets. The
@@ -181,7 +183,7 @@ via TLS termination before forwarding upstream.
 For LLM calls, the supervisor's inference router strips agent-supplied auth
 headers entirely and injects backend API keys from the gateway's credential store.
 
-## 7. Target Architecture (Phase 2)
+## 6. Target Architecture (Phase 2)
 
 Phase 2 introduces Kagenti as an OpenShell compute driver, implementing the
 `ComputeDriver` gRPC interface ([PR #817](https://github.com/NVIDIA/OpenShell/pull/817),
@@ -202,7 +204,7 @@ graph TB
     end
 ```
 
-## 8. OpenShell RFC 0001
+## 7. OpenShell RFC 0001
 
 OpenShell is being rearchitected via [RFC 0001](https://github.com/NVIDIA/OpenShell/pull/836)
 into a composable, driver-based system with four pluggable subsystems:
@@ -214,7 +216,7 @@ into a composable, driver-based system with four pluggable subsystems:
 | **Control-plane identity** | User/operator auth (mTLS, OIDC) | Keycloak OIDC |
 | **Sandbox identity** | Workload identity (SPIFFE) | SPIRE |
 
-## 9. Security: Init Container Pattern (TODO)
+## 8. Security: Init Container Pattern (TODO)
 
 The PoC uses `privileged: true` on the supervised agent container because
 the OpenShell supervisor needs `CAP_SYS_ADMIN` + `CAP_NET_ADMIN` for
@@ -251,7 +253,7 @@ the isolation. This eliminates the privileged window.
 **Requires:** Upstream OpenShell support for `--setup-only` mode (supervisor
 sets up isolation and exits, leaving the netns/Landlock for the next container).
 
-## 10. LLM Compatibility Matrix
+## 9. LLM Compatibility Matrix
 
 | Agent / CLI | LiteMaaS (llama-scout, deepseek) | Anthropic API | OpenAI API |
 |-------------|----------------------------------|---------------|------------|
@@ -271,7 +273,7 @@ Our custom Claude SDK agent works with LiteMaaS because it uses httpx
 directly with the OpenAI chat/completions format, bypassing Claude CLI's
 model validation.
 
-## 11. Egress Policy Enforcement Status
+## 10. Egress Policy Enforcement Status
 
 | Agent | Supervisor? | OPA Enforced? | Egress |
 |-------|------------|---------------|--------|
@@ -292,7 +294,7 @@ require port-forward to reach agents from the test runner. Solutions:
 2. Workaround: run tests from inside the cluster (e.g., test runner pod)
 3. Workaround: use a sidecar that bridges the netns port to the pod network
 
-## 12. Phase 1 PoC Results
+## 11. Phase 1 PoC Results
 
 > **Detail:** [e2e-test-matrix.md](e2e-test-matrix.md) — complete test matrix with per-agent results, future tests
 
@@ -301,9 +303,10 @@ with all security layers active. Key results:
 
 | Metric | Kind | HyperShift (OCP) |
 |--------|------|------------------|
-| E2E tests passed | 84+ | 80+ |
-| E2E tests failed | 0 | 0 |
-| E2E tests skipped | 7 | 9 |
+| E2E tests total | 117 | 117 |
+| E2E tests passed | 80+ | 75+ |
+| E2E tests failed | 0-1 | 0-2 |
+| E2E tests skipped | ~36 | ~40 |
 | Agent types tested | 7 (4 A2A + 3 builtin) | 7 |
 | Platforms | Kind with Istio | HyperShift (OCP 4.20) |
 
@@ -337,7 +340,7 @@ with all security layers active. Key results:
 | Builtin sandboxes | 5 | Sandbox CR CRUD, base image, Claude/OpenCode sandbox creation |
 | Sandbox lifecycle | 4 | List, create, delete, gateway processing |
 
-## 13. Phase 2: Kagenti Backend and UI Integration
+## 12. Phase 2: Kagenti Backend and UI Integration
 
 Phase 2 connects OpenShell sandboxes to the Kagenti management plane. The backend
 API and UI provide session management, observability, and lifecycle control that
@@ -442,7 +445,7 @@ OpenShell sandboxes through the same API used for Deployment-backed agents.
 | Human-in-the-loop approval | `HitlApprovalCard` | Not available |
 | Build progress tracking | `BuildProgressPage` | Not available |
 
-## 14. TODO: Production Readiness
+## 13. TODO: Production Readiness
 
 | Item | Priority | Description |
 |------|----------|-------------|
@@ -455,7 +458,7 @@ OpenShell sandboxes through the same API used for Deployment-backed agents.
 | Supervisor-managed A2A port | LOW | Expose agent port through supervisor proxy for netns-compatible testing |
 | Multi-namespace support | LOW | Add RoleBindings for team2, team3, etc. |
 
-## 15. Related PRs
+## 14. Related PRs
 
 Key upstream PRs relevant to integration:
 
