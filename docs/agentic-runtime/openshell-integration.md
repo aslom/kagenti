@@ -156,6 +156,7 @@ Custom agents use A2A protocol; built-in sandboxes use SSH/exec.
 ## 5. Sandboxing Layers
 
 > **Detail:** [sandboxing-layers.md](sandboxing-layers.md) — supervisor, Landlock, seccomp, netns, OPA, credential isolation, LLM compatibility
+> **Conversations & HITL:** [conversation-and-hitl.md](conversation-and-hitl.md) — multi-turn models, session persistence, HITL levels
 
 Each agent pod uses the OpenShell supervisor as the container entrypoint:
 
