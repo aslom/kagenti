@@ -71,7 +71,7 @@ graph TB
 
 ## 3. Two Agent Deployment Modes
 
-> **Detail:** [sandboxing-models.md](sandboxing-models.md) | **Per-agent:** [agents.md](agents.md)
+> **Detail:** [sandboxing-models.md](sandboxing-models.md) | **Per-agent:** [agents/README.md](agents/README.md) (detailed) | [agents.md](agents.md) (deployment quick-ref)
 
 Kagenti supports two agent deployment modes that coexist:
 
