@@ -111,10 +111,10 @@ fi
 
 export SKIP_DEPLOY="${SKIP_DEPLOY:-0}"
 # See kagenti-extensions authbridge/demos/weather-agent/deploy_and_verify_advanced.sh for defaults
-# (long enough for GitHub Kind: image pull + tool pod with many sidecars).
-export WEATHER_TOOL_ROLLOUT_TIMEOUT="${WEATHER_TOOL_ROLLOUT_TIMEOUT:-900s}"
-export WEATHER_AGENT_ROLLOUT_TIMEOUT="${WEATHER_AGENT_ROLLOUT_TIMEOUT:-600s}"
-export WEATHER_TOOL_KC_CLIENT_SEC="${WEATHER_TOOL_KC_CLIENT_SEC:-600}"
+# (align with spec.progressDeadlineSeconds: 1800 on the advanced Deployments).
+export WEATHER_TOOL_ROLLOUT_TIMEOUT="${WEATHER_TOOL_ROLLOUT_TIMEOUT:-1800s}"
+export WEATHER_AGENT_ROLLOUT_TIMEOUT="${WEATHER_AGENT_ROLLOUT_TIMEOUT:-1800s}"
+export WEATHER_TOOL_KC_CLIENT_SEC="${WEATHER_TOOL_KC_CLIENT_SEC:-900}"
 
 cleanup() {
     if [[ -n "$CLONE_DIR" && -d "$CLONE_DIR" ]]; then
