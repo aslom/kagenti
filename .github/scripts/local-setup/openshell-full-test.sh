@@ -460,8 +460,7 @@ spec:
             cpu: 500m
             memory: 512Mi
         readinessProbe:
-          httpGet:
-            path: /health
+          tcpSocket:
             port: 4000
           initialDelaySeconds: 10
           periodSeconds: 5
