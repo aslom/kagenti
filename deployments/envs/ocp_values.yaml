@@ -139,4 +139,5 @@ rhoai:
   profile: minimal    # minimal or full
   channel: fast-3.x
   kserve_mode: raw    # raw (no mesh needed) or serverless (deprecated)
+  mlflow: true         # Include mlflowoperator as Managed in the DSC
   scale_down: false    # Scale RHOAI operator/dashboard to 1 replica (test/dev clusters only)

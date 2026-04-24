@@ -84,8 +84,10 @@ done
 # This is required for installing OpenShift operators via Subscriptions
 echo "Waiting for OLM to be available..."
 for i in $(seq 1 $MAX_RETRIES); do
-    if kubectl api-resources | grep -q "subscriptions.*operators.coreos.com" 2>/dev/null; then
-        echo "OLM Subscription API is available"
+    if kubectl get crd subscriptions.operators.coreos.com &>/dev/null && \
+       kubectl get clusteroperator operator-lifecycle-manager \
+           -o jsonpath='{.status.conditions[?(@.type=="Available")].status}' 2>/dev/null | grep -q "True"; then
+        echo "OLM Subscription CRD and ClusterOperator are available"
         break
     fi
     echo "[$i/$MAX_RETRIES] Waiting for OLM..."

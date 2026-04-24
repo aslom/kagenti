@@ -37,3 +37,7 @@ spec:
       registriesNamespace: rhoai-model-registries
     trainingoperator:
       managementState: Removed
+{% if rhoai.mlflow | default(false) %}
+    mlflowoperator:
+      managementState: Managed
+{% endif %}

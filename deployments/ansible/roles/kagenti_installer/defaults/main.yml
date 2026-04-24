@@ -9,3 +9,4 @@ rhoai:
   profile: minimal
   channel: fast-3.x
   kserve_mode: raw
+  mlflow: false
