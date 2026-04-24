@@ -20,6 +20,8 @@
 #     authbridge/demos/weather-agent is included; verify with: git ls-remote --tags URL
 #   NAMESPACE                 K8s namespace (default: team1)
 #   SKIP_DEPLOY                 If 1, only run in-cluster verify (default: 0 = full deploy)
+#   WEATHER_TOOL_ROLLOUT_TIMEOUT / WEATHER_AGENT_ROLLOUT_TIMEOUT / WEATHER_TOOL_KC_CLIENT_SEC
+#                             Passed through to deploy_and_verify_advanced.sh (Kind CI defaults in that script)
 #
 # Usage (called from run-e2e-tests.sh when RUN_AUTHBRIDGE_WEATHER_E2E=1):
 #   ./.github/scripts/kind/91-run-authbridge-weather-e2e.sh
@@ -108,6 +110,11 @@ if [[ ! -x "$DEMO_DIR/deploy_and_verify_advanced.sh" ]]; then
 fi
 
 export SKIP_DEPLOY="${SKIP_DEPLOY:-0}"
+# See kagenti-extensions authbridge/demos/weather-agent/deploy_and_verify_advanced.sh for defaults
+# (long enough for GitHub Kind: image pull + tool pod with many sidecars).
+export WEATHER_TOOL_ROLLOUT_TIMEOUT="${WEATHER_TOOL_ROLLOUT_TIMEOUT:-900s}"
+export WEATHER_AGENT_ROLLOUT_TIMEOUT="${WEATHER_AGENT_ROLLOUT_TIMEOUT:-600s}"
+export WEATHER_TOOL_KC_CLIENT_SEC="${WEATHER_TOOL_KC_CLIENT_SEC:-600}"
 
 cleanup() {
     if [[ -n "$CLONE_DIR" && -d "$CLONE_DIR" ]]; then
