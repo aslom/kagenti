@@ -315,11 +315,15 @@ with all security layers active. Key results:
 | Metric | Kind | HyperShift (OCP) |
 |--------|------|------------------|
 | E2E tests total | 117 | 117 |
-| E2E tests passed | 80+ | 75+ |
-| E2E tests failed | 0-1 | 0-2 |
-| E2E tests skipped | ~36 | ~40 |
+| E2E tests passed | 78-82 | 75-76 |
+| E2E tests failed | 0-5 (rollout timing) | 0-4 (rollout timing) |
+| E2E tests skipped | 34 | 38 |
 | Agent types tested | 7 (4 A2A + 3 builtin) | 7 |
+| LiteLLM model proxy | Deployed (model aliases) | Deployed (model aliases) |
 | Platforms | Kind with Istio | HyperShift (OCP 4.20) |
+
+Failures are intermittent — all caused by rollout timing after LLM env var
+patching. On a clean run with stable rollouts: 0 failures on both platforms.
 
 ### Agent taxonomy (all tested)
 

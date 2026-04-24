@@ -19,10 +19,16 @@ explicitly skipped with documented reasons and TODOs.
 
 ## Phase 1 PoC Test Results
 
-| Platform | Passed | Failed | Skipped |
-|----------|--------|--------|---------|
-| Kind | 84+ | 0 | 7-9 |
-| HyperShift (OCP) | 80+ | 0 | 9-11 |
+| Platform | Total | Passed | Failed | Skipped | Notes |
+|----------|-------|--------|--------|---------|-------|
+| Kind | 117 | 78-82 | 0-5 | 34 | Failures are rollout timing; 0 on clean runs |
+| HyperShift | 117 | 75-76 | 0-4 | 38 | Same rollout timing issue |
+
+Infrastructure added since initial PoC:
+- LiteLLM model proxy with aliases (gpt-4o-mini → llama-scout-17b)
+- HITL OPA egress blocking tests
+- PVC workspace persistence tests
+- Sandbox creation for all builtin types
 
 ## Test Categories
 
