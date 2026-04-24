@@ -439,3 +439,49 @@ because they kill session-scoped port-forward fixtures.
    Complex — kubectl port-forward doesn't support reconnection.
 
 **Impact:** Would enable 4 `test_restart` tests and 1 `test_resume` test.
+
+---
+
+## 8. Upstream Dependencies — What Waits on OpenShell Rearchitecture
+
+### Q8.1: Can custom A2A agents use OpenShell credential management today?
+
+**Status:** BLOCKED (needs upstream `--expose-port` or port bridge sidecar)
+
+Custom A2A agents (ADK, Claude SDK) need to be accessible via K8s Service
+on port 8080. The supervisor's netns blocks this. Two solutions:
+
+1. **Port bridge sidecar (Kagenti contribution):** socat container bridges
+   pod network → netns. Can implement now without upstream changes.
+2. **Upstream `--expose-port` flag:** Supervisor natively reverse-proxies
+   inbound traffic. Cleaner but needs upstream PR.
+
+**Impact:** Would enable unified credential management for ALL agents.
+
+### Q8.2: Can builtin sandbox agents use LiteMaaS without model validation issues?
+
+**Status:** BLOCKED (needs upstream model-agnostic inference routing)
+
+Both Claude Code and OpenCode validate model names against hardcoded lists.
+`llama-scout-17b` is not in either list. The OpenShell inference router
+could do model ID rewriting (`gpt-4` → `llama-scout-17b`) but this is
+not yet configurable.
+
+**Workaround:** Use the Budget Proxy or LiteLLM with model aliases.
+**Upstream fix:** Configurable model ID mapping in the inference router.
+
+### Q8.3: Does the OpenShell RFC 0001 rearchitecture address these blockers?
+
+**Status:** INVESTIGATING
+
+[RFC 0001](https://github.com/NVIDIA/OpenShell/pull/836) introduces:
+- Pluggable compute drivers (Kagenti as driver)
+- Pluggable credential backends (K8s Secrets, Vault)
+- Composable subsystems (compute, credentials, identity, sandbox identity)
+
+This architecture would enable:
+- Kagenti-managed credential injection without supervisor netns issues
+- Model routing through the credential subsystem
+- Custom compute drivers that don't create netns when not needed
+
+**Impact:** Would resolve Q8.1 and Q8.2 cleanly.
