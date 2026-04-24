@@ -19,17 +19,50 @@
 
 ### Q1.1: How do long-running A2A agents fit the OpenShell model?
 
-**Status:** ANSWERED
+**Status:** OPEN (architecture decision — 3 deployment tiers)
 
-The proposal describes only CLI+SSH interactive sessions. Our PoC demonstrates
-that A2A agents (Deployments + Services) work alongside the OpenShell gateway
-without requiring the CLI or SSH tunnel.
+The goal is to use OpenShell for ALL agents — not just interactive CLI sandboxes.
+Custom A2A agents (ADK, Claude SDK, LangGraph) should get the same security
+benefits (Landlock, seccomp, OPA egress, zero-secret credentials) as builtin
+sandbox agents.
 
-**Answer:** Both models coexist. Custom A2A agents use Kagenti's Deployment model.
-Builtin sandboxes use OpenShell's Sandbox CR model. The Kagenti backend is the
-unified session manager for both.
+**Current PoC:** Two separate deployment models coexist:
+- Custom A2A agents → Kagenti Deployment (no supervisor, K8s Secrets for creds)
+- Builtin sandboxes → OpenShell Sandbox CR (supervisor, gateway creds)
 
-**Test coverage:** 8 tests in `test_02_a2a_connectivity.py` (all pass)
+**Target architecture — 3 deployment tiers:**
+
+| Tier | Deployment | Supervisor | Creds | OPA Egress | Port Access | When |
+|------|-----------|-----------|-------|-----------|-------------|------|
+| **Tier 1: Full OpenShell** | Sandbox CR via gateway | Yes (all layers) | Gateway provider injection | Yes (netns + OPA proxy) | SSH/ExecSandbox only | Builtin sandboxes (current) |
+| **Tier 2: Supervised Deployment** | K8s Deployment + supervisor entrypoint + port bridge sidecar | Yes (all layers) | Gateway provider injection | Yes (netns + OPA proxy) | A2A via port bridge | Custom A2A agents (next step) |
+| **Tier 3: Plain Deployment (fallback)** | K8s Deployment | No | K8s Secrets (secretKeyRef) | No (policy mounted but not enforced) | A2A direct | Current PoC for custom agents |
+
+**After OpenShell rearchitecture (RFC 0001):** The composable driver model
+enables partial adoption of OpenShell components:
+- Use **credential subsystem only** (gateway provider store) without supervisor
+- Use **Landlock + seccomp only** without network namespace (no port access issue)
+- Use **OPA policy only** as a sidecar (no netns required)
+- Mix and match per agent based on security requirements
+
+**What blocks moving from Tier 3 → Tier 2:**
+- Port bridge sidecar needed (socat — can implement now, no upstream needed)
+- Supervisor binary delivery via init container (proposal Option C)
+- Gateway provider injection for Deployment-backed agents (needs `OPENSHELL_SANDBOX_ID`)
+
+**What the rearchitecture enables (Tier 2 without workarounds):**
+- Supervisor `--expose-port` flag for native A2A port exposure
+- Pluggable credential backend (K8s Secrets as alternative to gateway store)
+- Selective security layers (Landlock without netns)
+
+**Fallback path:** Tier 3 (plain Deployment with K8s Secrets) always works.
+No OpenShell dependency. Tests pass. Production-grade with Istio mTLS.
+The upgrade path to Tier 2/1 is additive — existing agents don't break.
+
+**Test coverage:**
+- Tier 1 (builtin sandboxes): Sandbox CR creation, PVC persistence (passes)
+- Tier 2 (supervised A2A): `weather-agent-supervised` — all 12 enforcement tests pass
+- Tier 3 (plain deployment): All A2A connectivity, skill execution tests pass
 
 ### Q1.2: How should the Kagenti UI expose sandbox sessions?
 
