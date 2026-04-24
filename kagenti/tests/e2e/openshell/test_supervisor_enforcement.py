@@ -30,10 +30,11 @@ AGENT_NS = os.getenv("OPENSHELL_AGENT_NAMESPACE", "team1")
 SUPERVISED_AGENT = "weather-agent-supervised"
 
 
-def _kubectl(*args: str, timeout: int = 15) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["kubectl", *args], capture_output=True, text=True, timeout=timeout
-    )
+from kagenti.tests.e2e.openshell.conftest import kubectl_run
+
+
+def _kubectl(*args: str, timeout: int = 30) -> subprocess.CompletedProcess:
+    return kubectl_run(*args, timeout=timeout)
 
 
 def _get_supervisor_logs() -> str:

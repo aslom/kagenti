@@ -22,15 +22,11 @@ GATEWAY_NS = os.getenv("OPENSHELL_GATEWAY_NAMESPACE", "openshell-system")
 BASE_IMAGE = "ghcr.io/nvidia/openshell-community/sandboxes/base:latest"
 
 
+from kagenti.tests.e2e.openshell.conftest import kubectl_run, sandbox_crd_installed
+
+
 def _kubectl(*args: str, timeout: int = 30) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["kubectl", *args], capture_output=True, text=True, timeout=timeout
-    )
-
-
-def _sandbox_crd_exists() -> bool:
-    result = _kubectl("get", "crd", "sandboxes.agents.x-k8s.io")
-    return result.returncode == 0
+    return kubectl_run(*args, timeout=timeout)
 
 
 def _create_sandbox(name: str, command: str = "sleep 300") -> bool:
@@ -91,7 +87,7 @@ def _wait_for_sandbox_pod(name: str, timeout: int = 60) -> bool:
 
 
 skip_no_crd = pytest.mark.skipif(
-    not _sandbox_crd_exists(),
+    not sandbox_crd_installed(),
     reason="Sandbox CRD not installed",
 )
 
@@ -134,7 +130,18 @@ class TestBaseSandboxCreation:
         )
         assert result.returncode == 0
         logs = result.stdout.lower()
-        assert "sandbox" in logs, "Gateway logs don't mention sandbox processing"
+        has_sandbox_event = any(
+            kw in logs
+            for kw in [
+                "listing sandbox",
+                "sandbox created",
+                "sandbox deleted",
+                "reconcil",
+            ]
+        )
+        assert has_sandbox_event or "sandbox" in logs, (
+            "Gateway logs don't mention sandbox processing"
+        )
 
 
 class TestBuiltinCLIs:
@@ -172,12 +179,14 @@ class TestBuiltinCLIs:
             if sandbox_pods:
                 pod_name = sandbox_pods[0]["metadata"]["name"]
                 logs = _kubectl("logs", pod_name, "-n", SANDBOX_NS)
-                if logs.returncode == 0 and "OK" in logs.stdout:
-                    # At least some CLIs found
+                if logs.returncode == 0:
+                    output = logs.stdout
                     _delete_sandbox(name)
+                    assert "python3:OK" in output or "git:OK" in output, (
+                        f"Base image missing core CLIs. Output: {output}"
+                    )
                     return
 
-        # If we can't verify, skip rather than fail (image pull may be slow)
         _delete_sandbox(name)
         pytest.skip(
             "Could not verify base image CLIs — pod may not have started "
@@ -193,8 +202,8 @@ class TestClaudeSandbox:
         os.getenv("OPENSHELL_LLM_AVAILABLE", "").lower() != "true",
         reason="LLM not available — Claude sandbox needs provider config",
     )
-    def test_claude_sandbox_responds(self):
-        """Create a Claude sandbox and verify it can start."""
+    def test_claude_sandbox_cr_created(self):
+        """Create a Claude sandbox CR and verify it is accepted."""
         name = "test-claude-sb"
         _delete_sandbox(name)
         time.sleep(2)
@@ -220,7 +229,7 @@ class TestOpenCodeSandbox:
         os.getenv("OPENSHELL_LLM_AVAILABLE", "").lower() != "true",
         reason="LLM not available — OpenCode sandbox needs provider config",
     )
-    def test_opencode_sandbox_responds(self):
+    def test_opencode_sandbox_cr_created(self):
         """Create an OpenCode sandbox and verify it starts."""
         name = "test-opencode-sb"
         _delete_sandbox(name)

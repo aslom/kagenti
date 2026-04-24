@@ -45,18 +45,10 @@ def _read_skill(skill_name: str) -> str:
     return content[:2000]
 
 
-def _sandbox_crd_exists() -> bool:
-    r = subprocess.run(
-        ["kubectl", "get", "crd", "sandboxes.agents.x-k8s.io"],
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    return r.returncode == 0
-
+from kagenti.tests.e2e.openshell.conftest import sandbox_crd_installed
 
 skip_no_crd = pytest.mark.skipif(
-    not _sandbox_crd_exists(), reason="Sandbox CRD not installed"
+    not sandbox_crd_installed(), reason="Sandbox CRD not installed"
 )
 
 

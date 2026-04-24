@@ -41,6 +41,8 @@ from kagenti.tests.e2e.openshell.conftest import (
     extract_a2a_text,
     extract_context_id,
     kubectl_get_pods_json,
+    kubectl_run,
+    sandbox_crd_installed,
 )
 
 pytestmark = pytest.mark.openshell
@@ -55,13 +57,7 @@ BASE_IMAGE = "ghcr.io/nvidia/openshell-community/sandboxes/base:latest"
 
 
 def _kubectl(*args: str, timeout: int = 30) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["kubectl", *args], capture_output=True, text=True, timeout=timeout
-    )
-
-
-def _sandbox_crd_exists() -> bool:
-    return _kubectl("get", "crd", "sandboxes.agents.x-k8s.io").returncode == 0
+    return kubectl_run(*args, timeout=timeout)
 
 
 def _deploy_ready(name: str, ns: str = AGENT_NS) -> bool:
@@ -106,7 +102,7 @@ def _cleanup_sandbox(name: str, pvc: str, ns: str = AGENT_NS):
 
 
 skip_no_crd = pytest.mark.skipif(
-    not _sandbox_crd_exists(), reason="Sandbox CRD not installed"
+    not sandbox_crd_installed(), reason="Sandbox CRD not installed"
 )
 
 # ---------------------------------------------------------------------------

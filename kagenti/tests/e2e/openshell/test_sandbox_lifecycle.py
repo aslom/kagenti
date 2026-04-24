@@ -23,26 +23,22 @@ from kagenti.tests.e2e.openshell.conftest import (
     extract_a2a_text,
     kubectl_get_pods_json,
     kubectl_get_deployments_json,
+    kubectl_run,
+    sandbox_crd_installed,
 )
 
 pytestmark = pytest.mark.openshell
 
-SANDBOX_NS = "team1"
+SANDBOX_NS = os.getenv("OPENSHELL_AGENT_NAMESPACE", "team1")
 SANDBOX_NAME = "test-sandbox-poc"
 
 
 def _kubectl(*args: str, timeout: int = 30) -> subprocess.CompletedProcess:
-    cmd = ["kubectl", *args]
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-
-
-def _sandbox_crd_installed() -> bool:
-    result = _kubectl("get", "crd", "sandboxes.agents.x-k8s.io")
-    return result.returncode == 0
+    return kubectl_run(*args, timeout=timeout)
 
 
 skip_no_crd = pytest.mark.skipif(
-    not _sandbox_crd_installed(),
+    not sandbox_crd_installed(),
     reason="Sandbox CRD (agents.x-k8s.io) not installed",
 )
 

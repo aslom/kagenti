@@ -121,14 +121,10 @@ def _port_forward(name: str, namespace: str, remote_port: int):
 
 @pytest.fixture(scope="session")
 def weather_agent_url(agent_namespace, agent_port):
-    """Port-forward to weather agent."""
+    """Port-forward to weather-agent (non-supervised only)."""
     url, proc = _port_forward("weather-agent", agent_namespace, agent_port)
     if not url:
-        url, proc = _port_forward(
-            "weather-agent-supervised", agent_namespace, agent_port
-        )
-    if not url:
-        pytest.skip("Cannot reach weather agent (netns may block port-forward)")
+        pytest.skip("Cannot reach weather-agent (not deployed or port-forward failed)")
     yield url
     if proc:
         proc.terminate()
@@ -237,6 +233,23 @@ def extract_a2a_text(response: dict) -> str:
             texts.append(part.get("text", ""))
 
     return "\n".join(texts)
+
+
+# ---------------------------------------------------------------------------
+# Shared kubectl helpers (used across test files — import from conftest)
+# ---------------------------------------------------------------------------
+
+
+def kubectl_run(*args: str, timeout: int = 30) -> subprocess.CompletedProcess:
+    """Run a kubectl command and return the result."""
+    return subprocess.run(
+        ["kubectl", *args], capture_output=True, text=True, timeout=timeout
+    )
+
+
+def sandbox_crd_installed() -> bool:
+    """Check if the Sandbox CRD (agents.x-k8s.io) is installed."""
+    return kubectl_run("get", "crd", "sandboxes.agents.x-k8s.io").returncode == 0
 
 
 # ---------------------------------------------------------------------------
