@@ -284,19 +284,125 @@ spec:
 
     @skip_no_crd
     def test_sandbox_creation__claude__creates_with_workspace(self):
-        """Claude Code sandbox creates with /workspace mount."""
-        pytest.skip(
-            "openshell_claude: Sandbox creation verified in test_pvc_persistence. "
-            "Duplicate test removed."
+        """Claude Code sandbox CR is accepted with PVC workspace mount."""
+        name = "test-claude-create"
+        pvc = f"{name}-pvc"
+        _cleanup_sandbox(name, pvc)
+
+        subprocess.run(
+            ["kubectl", "apply", "-f", "-"],
+            input=f"""
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {pvc}
+  namespace: {AGENT_NS}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 100Mi
+""",
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
+
+        result = subprocess.run(
+            ["kubectl", "apply", "-f", "-"],
+            input=f"""
+apiVersion: agents.x-k8s.io/v1alpha1
+kind: Sandbox
+metadata:
+  name: {name}
+  namespace: {AGENT_NS}
+spec:
+  podTemplate:
+    spec:
+      containers:
+      - name: sandbox
+        image: {BASE_IMAGE}
+        command: ["sleep", "30"]
+        volumeMounts:
+        - name: workspace
+          mountPath: /workspace
+      volumes:
+      - name: workspace
+        persistentVolumeClaim:
+          claimName: {pvc}
+""",
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, (
+            f"Failed to create Claude sandbox CR: {result.stderr}"
+        )
+
+        r = _kubectl("get", "sandbox", name, "-n", AGENT_NS)
+        _cleanup_sandbox(name, pvc)
+        assert r.returncode == 0, "Claude sandbox CR not found after creation"
 
     @skip_no_crd
     def test_sandbox_creation__opencode__creates_with_workspace(self):
-        """OpenCode sandbox creates with /workspace mount."""
-        pytest.skip(
-            "openshell_opencode: Sandbox creation verified in test_pvc_persistence. "
-            "Duplicate test removed."
+        """OpenCode sandbox CR is accepted with PVC workspace mount."""
+        name = "test-opencode-create"
+        pvc = f"{name}-pvc"
+        _cleanup_sandbox(name, pvc)
+
+        subprocess.run(
+            ["kubectl", "apply", "-f", "-"],
+            input=f"""
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {pvc}
+  namespace: {AGENT_NS}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 100Mi
+""",
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
+
+        result = subprocess.run(
+            ["kubectl", "apply", "-f", "-"],
+            input=f"""
+apiVersion: agents.x-k8s.io/v1alpha1
+kind: Sandbox
+metadata:
+  name: {name}
+  namespace: {AGENT_NS}
+spec:
+  podTemplate:
+    spec:
+      containers:
+      - name: sandbox
+        image: {BASE_IMAGE}
+        command: ["sleep", "30"]
+        volumeMounts:
+        - name: workspace
+          mountPath: /workspace
+      volumes:
+      - name: workspace
+        persistentVolumeClaim:
+          claimName: {pvc}
+""",
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, (
+            f"Failed to create OpenCode sandbox CR: {result.stderr}"
+        )
+
+        r = _kubectl("get", "sandbox", name, "-n", AGENT_NS)
+        _cleanup_sandbox(name, pvc)
+        assert r.returncode == 0, "OpenCode sandbox CR not found after creation"
 
 
 # ═══════════════════════════════════════════════════════════════════════════

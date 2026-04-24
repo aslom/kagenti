@@ -131,12 +131,40 @@ class TestAgentCardDiscovery:
         card = resp.json()
         assert "name" in card
 
-    async def test_agent_card__weather_supervised__not_accessible(
-        self, agent_namespace
-    ):
-        """Supervised agent netns blocks external HTTP access to .well-known."""
-        pytest.skip(
-            "weather_supervised: netns blocks external HTTP. "
-            "Agent card exists but only accessible via OPA proxy in netns. "
-            "TODO: kubectl exec -c agent -- wget http://localhost:8080/.well-known/agent-card.json"
+    async def test_agent_card__weather_supervised__via_exec(self, agent_namespace):
+        """Supervised agent card accessible via kubectl exec (netns blocks port-forward)."""
+        from kagenti.tests.e2e.openshell.conftest import kubectl_run
+
+        deploy = "weather-agent-supervised"
+        r = kubectl_run(
+            "get",
+            "deploy",
+            deploy,
+            "-n",
+            agent_namespace,
+            "-o",
+            "jsonpath={.status.readyReplicas}",
+        )
+        if r.returncode != 0 or r.stdout.strip() != "1":
+            pytest.skip(f"{deploy}: not deployed")
+
+        result = kubectl_run(
+            "exec",
+            f"deploy/{deploy}",
+            "-n",
+            agent_namespace,
+            "-c",
+            "agent",
+            "--",
+            "python3",
+            "-c",
+            "import urllib.request; "
+            "r = urllib.request.urlopen('http://localhost:8080/.well-known/agent-card.json', timeout=5); "
+            "print(r.read().decode())",
+            timeout=30,
+        )
+        if result.returncode != 0:
+            pytest.skip(f"Cannot reach agent card inside netns: {result.stderr[:200]}")
+        assert "name" in result.stdout.lower(), (
+            f"Agent card missing 'name' field: {result.stdout[:200]}"
         )

@@ -384,10 +384,22 @@ class TestCodeGenerationSkill:
     async def test_code_generation__claude_sdk_agent__generates_code(
         self, claude_sdk_agent_url
     ):
-        """Claude SDK agent generates code from requirements."""
-        pytest.skip(
-            "TODO: Implement code generation skill test. "
-            "Requires: test:write or similar skill in .claude/skills/."
+        """Claude SDK agent generates code from a natural language spec."""
+        async with httpx.AsyncClient() as client:
+            resp = await a2a_send(
+                client,
+                claude_sdk_agent_url,
+                "Write a Python function called `fibonacci(n)` that returns the "
+                "nth Fibonacci number using iteration. Include a docstring.",
+                request_id="code-gen-claude",
+                timeout=120.0,
+            )
+        assert "result" in resp
+        text = extract_a2a_text(resp)
+        assert text and len(text) > 30
+        text_lower = text.lower()
+        assert "def " in text_lower or "fibonacci" in text_lower, (
+            f"Response doesn't contain code: {text[:200]}"
         )
 
 
