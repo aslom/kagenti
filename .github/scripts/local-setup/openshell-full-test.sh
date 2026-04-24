@@ -385,30 +385,129 @@ if [ "$SKIP_AGENTS" = "false" ]; then
     PLATFORM="$PLATFORM" CLUSTER_NAME="$CLUSTER_NAME" AGENT_NS="team1" \
         ./.github/scripts/local-setup/openshell-build-agents.sh
 
-    # ── Patch LLM env vars (idempotent) ─────────────────────────────
-    # Deployment YAMLs point to the Budget Proxy by default.
-    # When the Budget Proxy is not deployed, patch agents to call LiteMaaS directly.
-    if ! kubectl get svc llm-budget-proxy -n team1 >/dev/null 2>&1; then
-        if [ "$MAAS_SOURCED" = "true" ]; then
-            LITEMAAS_URL="${MAAS_LLAMA4_API_BASE:-https://litellm-prod.apps.maas.redhatworkshops.io/v1}"
-            LITEMAAS_MODEL="${MAAS_LLAMA4_MODEL:-llama-scout-17b}"
-            log_step "No Budget Proxy — patching agents to use LiteMaaS directly"
+    # ── Deploy LiteLLM model proxy (idempotent) ──────────────────────
+    # LiteLLM provides: model aliasing (gpt-4o-mini → llama-scout-17b),
+    # virtual key isolation (agent never sees real LiteMaaS key),
+    # and OpenAI-compatible endpoint for all agents including OpenCode.
+    LITELLM_PROXY_NAME="litellm-model-proxy"
+    if [ "$MAAS_SOURCED" = "true" ]; then
+        LITEMAAS_URL="${MAAS_LLAMA4_API_BASE:-https://litellm-prod.apps.maas.redhatworkshops.io/v1}"
+        LITEMAAS_KEY="${MAAS_LLAMA4_API_KEY:-}"
+        LITEMAAS_MODEL="${MAAS_LLAMA4_MODEL:-llama-scout-17b}"
 
-            # ADK agent: LiteLlm uses OPENAI_API_BASE / LLM_MODEL
-            kubectl set env deploy/adk-agent -n team1 \
-                "OPENAI_API_BASE=$LITEMAAS_URL" \
-                "LLM_MODEL=openai/$LITEMAAS_MODEL" 2>/dev/null || true
-
-            # Claude SDK agent: uses ANTHROPIC_BASE_URL / ANTHROPIC_MODEL
-            # (OpenAI-compatible format auto-detected when base_url is not anthropic.com)
-            kubectl set env deploy/claude-sdk-agent -n team1 \
-                "ANTHROPIC_BASE_URL=$LITEMAAS_URL" \
-                "ANTHROPIC_MODEL=$LITEMAAS_MODEL" 2>/dev/null || true
+        if ! kubectl get deploy "$LITELLM_PROXY_NAME" -n team1 >/dev/null 2>&1; then
+            log_step "Deploying LiteLLM model proxy with model aliases..."
+            kubectl apply -f - <<EOLITELLM
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: litellm-config
+  namespace: team1
+data:
+  config.yaml: |
+    model_list:
+      - model_name: "gpt-4o-mini"
+        litellm_params:
+          model: "openai/$LITEMAAS_MODEL"
+          api_base: "$LITEMAAS_URL"
+          api_key: "$LITEMAAS_KEY"
+      - model_name: "gpt-4o"
+        litellm_params:
+          model: "openai/$LITEMAAS_MODEL"
+          api_base: "$LITEMAAS_URL"
+          api_key: "$LITEMAAS_KEY"
+      - model_name: "gpt-4"
+        litellm_params:
+          model: "openai/$LITEMAAS_MODEL"
+          api_base: "$LITEMAAS_URL"
+          api_key: "$LITEMAAS_KEY"
+      - model_name: "$LITEMAAS_MODEL"
+        litellm_params:
+          model: "openai/$LITEMAAS_MODEL"
+          api_base: "$LITEMAAS_URL"
+          api_key: "$LITEMAAS_KEY"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: $LITELLM_PROXY_NAME
+  namespace: team1
+  labels:
+    app.kubernetes.io/name: $LITELLM_PROXY_NAME
+    app.kubernetes.io/part-of: kagenti
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: $LITELLM_PROXY_NAME
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: $LITELLM_PROXY_NAME
+    spec:
+      containers:
+      - name: litellm
+        image: ghcr.io/berriai/litellm:main-v1.63.14-stable
+        args: ["--config", "/config/config.yaml", "--port", "4000"]
+        ports:
+        - containerPort: 4000
+          name: http
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 4000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        volumeMounts:
+        - name: config
+          mountPath: /config
+      volumes:
+      - name: config
+        configMap:
+          name: litellm-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: $LITELLM_PROXY_NAME
+  namespace: team1
+  labels:
+    app.kubernetes.io/name: $LITELLM_PROXY_NAME
+spec:
+  selector:
+    app.kubernetes.io/name: $LITELLM_PROXY_NAME
+  ports:
+  - name: http
+    port: 4000
+    targetPort: 4000
+EOLITELLM
+            kubectl rollout status "deploy/$LITELLM_PROXY_NAME" -n team1 --timeout=120s 2>/dev/null || {
+                log_warn "LiteLLM proxy rollout not complete"
+            }
         else
-            log_warn "No Budget Proxy and no .env.maas — LLM tests will skip"
+            log_step "LiteLLM model proxy already deployed"
         fi
+
+        # Patch agents to route through LiteLLM proxy
+        LITELLM_URL="http://$LITELLM_PROXY_NAME.team1.svc:4000/v1"
+        log_step "Patching agents to use LiteLLM proxy at $LITELLM_URL"
+
+        kubectl set env deploy/adk-agent -n team1 \
+            "OPENAI_API_BASE=$LITELLM_URL" \
+            "LLM_MODEL=openai/$LITEMAAS_MODEL" 2>/dev/null || true
+
+        kubectl set env deploy/claude-sdk-agent -n team1 \
+            "ANTHROPIC_BASE_URL=$LITELLM_URL" \
+            "ANTHROPIC_MODEL=$LITEMAAS_MODEL" 2>/dev/null || true
     else
-        log_step "Budget Proxy deployed — agents will route through proxy"
+        log_warn "No .env.maas — LLM tests will skip, no LiteLLM proxy deployed"
     fi
 
     # ── Wait for all rollouts to complete ─────────────────────────────
