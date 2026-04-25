@@ -26,9 +26,8 @@ permissions:
 # Version tracking - keep in sync with kind-config in scripts/kind/setup-kagenti.sh
 env:
   K8S_VERSION: '1.35.0'  # Must match kindest/node version in kind-config
-  # Pre-merge of kagenti/kagenti-extensions#347: test from fork; revert to kagenti org + main after merge.
-  KAGENTI_EXTENSIONS_GIT_URL: 'https://github.com/mrsabath/kagenti-extensions.git'
-  KAGENTI_EXTENSIONS_GIT_REF: 'fix/weather-e2e-progress-deadline'
+  # kagenti-extensions#347 merged: AuthBridge weather advanced fixes on main; 91 clones default org URL.
+  KAGENTI_EXTENSIONS_GIT_REF: 'main'
 
 jobs:
   e2e-dev-kagenti-operator:
