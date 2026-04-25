@@ -21,7 +21,7 @@
 #   NAMESPACE                 K8s namespace (default: team1)
 #   SKIP_DEPLOY                 If 1, only run in-cluster verify (default: 0 = full deploy)
 #   WEATHER_TOOL_ROLLOUT_TIMEOUT / WEATHER_AGENT_ROLLOUT_TIMEOUT / WEATHER_TOOL_KC_CLIENT_SEC
-#                             Passed through to deploy_and_verify_advanced.sh (Kind CI defaults in that script)
+#   WEATHER_ADVANCED_PRUNE_LEGACY   Passed to deploy (default: 1 here — scale down wave-90 weather)
 #
 # Usage (called from run-e2e-tests.sh when RUN_AUTHBRIDGE_WEATHER_E2E=1):
 #   ./.github/scripts/kind/91-run-authbridge-weather-e2e.sh
@@ -115,7 +115,7 @@ export SKIP_DEPLOY="${SKIP_DEPLOY:-0}"
 export WEATHER_TOOL_ROLLOUT_TIMEOUT="${WEATHER_TOOL_ROLLOUT_TIMEOUT:-1800s}"
 export WEATHER_AGENT_ROLLOUT_TIMEOUT="${WEATHER_AGENT_ROLLOUT_TIMEOUT:-1800s}"
 export WEATHER_TOOL_KC_CLIENT_SEC="${WEATHER_TOOL_KC_CLIENT_SEC:-900}"
-# Kind has one node; free CPU by scaling down baseline weather workloads before advanced deploy.
+# One Kind node: pytest leaves weather-service + weather-tool; scale them down in deploy script.
 export WEATHER_ADVANCED_PRUNE_LEGACY="${WEATHER_ADVANCED_PRUNE_LEGACY:-1}"
 
 cleanup() {
