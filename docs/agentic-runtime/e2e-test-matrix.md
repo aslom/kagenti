@@ -24,11 +24,135 @@ explicitly skipped with documented reasons and TODOs.
 | Kind | 117 | 78-82 | 0-5 | 34 | Failures are rollout timing; 0 on clean runs |
 | HyperShift | 117 | 75-76 | 0-4 | 38 | Same rollout timing issue |
 
-Infrastructure added since initial PoC:
+Infrastructure:
 - LiteLLM model proxy with aliases (gpt-4o-mini → llama-scout-17b)
-- HITL OPA egress blocking tests
+- HITL OPA egress blocking tests (python3 urllib, not curl)
 - PVC workspace persistence tests
-- Sandbox creation for all builtin types
+- Sandbox creation for Claude + OpenCode
+- TCP readiness probes (Istio ambient mTLS compatible)
+
+## Result Legend
+
+- **PASS** (✅) — test runs and passes
+- **FAIL** — test runs but assertion fails (intermittent = rollout timing)
+- **SKIP** (⏭️) — test skips with documented reason
+- **—** — test not applicable for this agent type
+
+## Skill Execution Matrix (Kind, fresh cluster)
+
+| Skill | adk | claude_sdk | weather | supervised | os_claude | os_opencode | os_generic |
+|-------|-----|-----------|---------|-----------|----------|------------|-----------|
+| PR review | ✅ | ✅ | ⏭️ no LLM | ⏭️ no LLM | ⏭️ Anthropic key | ⏭️ /v1/responses API | ⏭️ no agent |
+| RCA | ✅ | ✅ | ⏭️ no LLM | ⏭️ no LLM | ⏭️ Anthropic key | ⏭️ /v1/responses API | ⏭️ no agent |
+| Security review | ✅ | ✅ | ⏭️ no LLM | ⏭️ no LLM | ⏭️ Anthropic key | ⏭️ /v1/responses API | ⏭️ no agent |
+| Code generation | — | ✅ | — | — | — | — | — |
+| Real GitHub PR | ✅ | ✅ | — | — | ⏭️ Anthropic key | ⏭️ /v1/responses API | — |
+| RCA CI logs | — | ✅ | — | — | — | — | — |
+
+**Skip reasons:**
+- `no LLM` — agent has no LLM capability (by design)
+- `no agent` — generic sandbox has no agent CLI
+- `Anthropic key` — Claude Code requires real Anthropic API key (Phase 2)
+- `/v1/responses API` — OpenCode uses OpenAI Responses API which LiteLLM doesn't proxy (needs LiteLLM update or OpenCode flag)
+
+## A2A Connectivity Matrix
+
+Tests basic message/send and agent card discovery. Only custom A2A agents
+are tested — builtin sandboxes (os_claude, os_opencode, os_generic) don't
+expose A2A endpoints (they use SSH/exec instead).
+
+| Test | weather_agent | adk_agent | claude_sdk_agent | weather_supervised | os_claude | os_opencode | os_generic |
+|------|--------------|-----------|-----------------|-------------------|----------|------------|-----------|
+| A2A hello | ✅ | ✅ | ✅ | ✅ (exec) | — | — | — |
+| Agent card | ✅ | ✅ | ✅ | ⏭️ netns | — | — | — |
+
+**Why no builtin sandboxes:** Builtin sandboxes don't run A2A servers. They are
+CLI tools (Claude Code, OpenCode) accessed via SSH or kubectl exec, not HTTP.
+
+## Multi-Turn Conversation Matrix
+
+Tests sequential A2A messages and context persistence. Only A2A agents
+can be tested via the A2A protocol. Builtin sandboxes would need the
+ExecSandbox gRPC adapter for multi-turn (Phase 2).
+
+| Test | weather_agent | adk_agent | claude_sdk_agent | weather_supervised | os_claude | os_opencode | os_generic |
+|------|--------------|-----------|-----------------|-------------------|----------|------------|-----------|
+| 3 sequential messages | ✅ | ✅ | ✅ | ✅ (exec) | — | — | — |
+| Context isolation | ✅ | ✅ | ✅ | ⏭️ netns | — | — | — |
+| Context continuity | ⏭️ stateless | ⏭️ ADK gap | ⏭️ stateless | ⏭️ Phase 2 | — | — | — |
+
+**Why no builtin sandboxes:** Multi-turn requires sending multiple messages.
+Builtin sandboxes use terminal sessions (persistent by nature) or need the
+ExecSandbox gRPC adapter to simulate multi-turn.
+
+## Credential Security Matrix
+
+Tests secret delivery and policy mounting. All custom A2A agents are tested.
+Builtin sandboxes are not tested because they use the OpenShell gateway's
+provider injection mechanism (different credential path — see Q2.3).
+
+| Test | weather_agent | adk_agent | claude_sdk_agent | weather_supervised | os_claude | os_opencode | os_generic |
+|------|--------------|-----------|-----------------|-------------------|----------|------------|-----------|
+| secretKeyRef delivery | — | ✅ | ✅ | — | — | — | — |
+| No hardcoded keys | ✅ | ✅ | ✅ | ✅ | — | — | — |
+| No K8s token leak | ✅ | ✅ | ✅ | ✅ | — | — | — |
+| Policy file mounted | ✅ | ✅ | ✅ | ✅ | — | — | — |
+| Policy valid YAML | ✅ | ✅ | ✅ | ✅ | — | — | — |
+
+**Why only custom agents:** Builtin sandboxes get credentials from the OpenShell
+gateway via `GetProviderEnvironment` gRPC, not from K8s Secrets.
+**Why weather/supervised have no secretKeyRef:** They have no LLM API key.
+
+## Supervisor Enforcement Matrix
+
+Tests OpenShell supervisor security layers. Only `weather_supervised` has
+the supervisor deployed. Other custom A2A agents are Tier 3 (no supervisor).
+Builtin sandboxes have the supervisor but are tested via sandbox lifecycle
+tests, not enforcement-specific tests.
+
+| Test | weather_agent | adk_agent | claude_sdk_agent | weather_supervised | os_claude | os_opencode | os_generic |
+|------|--------------|-----------|-----------------|-------------------|----------|------------|-----------|
+| Landlock applied | — | — | — | ✅ | — | — | — |
+| Landlock ABI V3 | — | — | — | ✅ | — | — | — |
+| Read-only paths | — | — | — | ✅ | — | — | — |
+| Read-write paths | — | — | — | ✅ | — | — | — |
+| Netns created | — | — | — | ✅ | — | — | — |
+| OPA proxy | — | — | — | ✅ | — | — | — |
+| Seccomp | — | — | — | ✅ | — | — | — |
+| TLS termination | — | — | — | ✅ | — | — | — |
+
+**Why only weather_supervised:** It's the only Tier 2 agent (Deployment + supervisor).
+Other agents are Tier 3 (no supervisor). When agents upgrade to Tier 2,
+these tests will cover them too.
+
+## Workspace Persistence Matrix
+
+Tests PVC-backed workspace for builtin sandboxes. Custom A2A agents don't
+have persistent workspaces (they're stateless services).
+
+| Test | weather_agent | adk_agent | claude_sdk_agent | weather_supervised | os_claude | os_opencode | os_generic |
+|------|--------------|-----------|-----------------|-------------------|----------|------------|-----------|
+| Session to PVC | — | — | — | — | ✅ | ✅ | ✅ |
+| PVC survives deletion | — | — | — | — | — | — | ✅ |
+| Sandbox CR created | — | — | — | — | ✅ | ✅ | ✅ |
+
+**Why only builtin sandboxes:** Custom A2A agents are Deployment-backed
+stateless services — they don't have workspace PVCs. Builtin sandboxes
+are the ones with persistent workspaces for code, configs, and sessions.
+
+## HITL Policy Matrix
+
+Tests OPA egress enforcement. Only `weather_supervised` has the supervisor
+with OPA proxy active. When other agents upgrade to Tier 2, HITL will apply.
+
+| Test | weather_agent | adk_agent | claude_sdk_agent | weather_supervised | os_claude | os_opencode | os_generic |
+|------|--------------|-----------|-----------------|-------------------|----------|------------|-----------|
+| OPA denies egress | — | — | — | ✅ | — | — | — |
+| OPA allows egress | — | — | — | ⏭️ DNS | — | — | — |
+| Denial logged | — | — | — | ⏭️ log fmt | — | — | — |
+
+**Why only weather_supervised:** Only Tier 2 agents have the supervisor's
+OPA proxy for egress enforcement.
 
 ## Test Categories
 
