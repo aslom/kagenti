@@ -308,6 +308,7 @@ require port-forward to reach agents from the test runner. Solutions:
 ## 11. Phase 1 PoC Results
 
 > **Detail:** [e2e-test-matrix.md](e2e-test-matrix.md) — complete test matrix with per-agent results, future tests
+> **Test docs:** [tests/](tests/) — detailed per-category test documentation with architecture diagrams
 
 The PoC validates that OpenShell runs on native Kubernetes (Kind and OpenShift/HyperShift)
 with all security layers active. Key results:

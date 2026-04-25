@@ -1,6 +1,6 @@
 # OpenShell E2E Test Matrix
 
-> Back to [main doc](openshell-integration.md)
+> Back to [main doc](openshell-integration.md) | **Detailed test docs:** [tests/](tests/)
 
 ## Agent Taxonomy
 
