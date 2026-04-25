@@ -136,9 +136,14 @@ have persistent workspaces (they're stateless services).
 | PVC survives deletion | — | — | — | — | — | — | ✅ |
 | Sandbox CR created | — | — | — | — | ✅ | ✅ | ✅ |
 
-**Why only builtin sandboxes:** Custom A2A agents are Deployment-backed
-stateless services — they don't have workspace PVCs. Builtin sandboxes
+**Why only builtin sandboxes (current):** Custom A2A agents are Deployment-backed
+stateless services and don't have workspace PVCs in this PoC. Builtin sandboxes
 are the ones with persistent workspaces for code, configs, and sessions.
+
+**Future integration:** The Kagenti sandboxing PR adds workspace PVCs to custom
+agents (Tier 2/3 Deployments with PVC mounts). When deployed, these tests will
+extend to cover custom agent workspace persistence — enabling session state,
+agent memory, and file persistence across pod restarts for all agent types.
 
 ## HITL Policy Matrix
 
