@@ -115,6 +115,8 @@ export SKIP_DEPLOY="${SKIP_DEPLOY:-0}"
 export WEATHER_TOOL_ROLLOUT_TIMEOUT="${WEATHER_TOOL_ROLLOUT_TIMEOUT:-1800s}"
 export WEATHER_AGENT_ROLLOUT_TIMEOUT="${WEATHER_AGENT_ROLLOUT_TIMEOUT:-1800s}"
 export WEATHER_TOOL_KC_CLIENT_SEC="${WEATHER_TOOL_KC_CLIENT_SEC:-900}"
+# Kind has one node; free CPU by scaling down baseline weather workloads before advanced deploy.
+export WEATHER_ADVANCED_PRUNE_LEGACY="${WEATHER_ADVANCED_PRUNE_LEGACY:-1}"
 
 cleanup() {
     if [[ -n "$CLONE_DIR" && -d "$CLONE_DIR" ]]; then
