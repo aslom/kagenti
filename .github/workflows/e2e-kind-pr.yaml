@@ -138,6 +138,12 @@ jobs:
         env:
           NAMESPACE: team1
 
+      - name: Restore baseline weather for UI E2E
+        if: success()
+        run: bash .github/scripts/kind/90c-restore-baseline-weather-for-ui.sh
+        env:
+          NAMESPACE: team1
+
       - name: Run UI E2E tests
         if: success()
         run: bash .github/scripts/common/92-run-ui-tests.sh
