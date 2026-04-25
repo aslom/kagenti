@@ -421,6 +421,21 @@ data:
           model: "openai/$LITEMAAS_MODEL"
           api_base: "$LITEMAAS_URL"
           api_key: "$LITEMAAS_KEY"
+      - model_name: "gpt-5-nano"
+        litellm_params:
+          model: "openai/$LITEMAAS_MODEL"
+          api_base: "$LITEMAAS_URL"
+          api_key: "$LITEMAAS_KEY"
+      - model_name: "gpt-5"
+        litellm_params:
+          model: "openai/$LITEMAAS_MODEL"
+          api_base: "$LITEMAAS_URL"
+          api_key: "$LITEMAAS_KEY"
+      - model_name: "gpt-5-mini"
+        litellm_params:
+          model: "openai/$LITEMAAS_MODEL"
+          api_base: "$LITEMAAS_URL"
+          api_key: "$LITEMAAS_KEY"
       - model_name: "$LITEMAAS_MODEL"
         litellm_params:
           model: "openai/$LITEMAAS_MODEL"
