@@ -402,3 +402,50 @@ export interface PodStorageStats {
   mounts: MountInfo[];
   total_mounts: number;
 }
+
+// Skill types
+export interface SkillLabels {
+  category?: string;
+  type?: string;
+}
+
+export interface Skill {
+  name: string;
+  namespace: string;
+  resourceName: string;
+  description: string;
+  status: string;
+  labels: SkillLabels;
+  createdAt?: string;
+  origin?: string;
+  usageCount: number;
+}
+
+export interface SkillFile {
+  name: string;
+  path: string;
+  content: string;
+  size: number;
+}
+
+export interface SkillDetail extends Skill {
+  dataKeys: string[];
+  annotations: Record<string, string>;
+  files: SkillFile[];
+}
+
+export interface CreateSkillRequest {
+  name: string;
+  namespace: string;
+  description?: string;
+  category?: string;
+  url?: string;
+  files?: Record<string, string>;
+}
+
+export interface CreateSkillResponse {
+  success: boolean;
+  name: string;
+  namespace: string;
+  message: string;
+}

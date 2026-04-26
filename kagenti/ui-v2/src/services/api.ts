@@ -21,6 +21,11 @@ import type {
   FileEntry,
   FileContent,
   PodStorageStats,
+  Skill,
+  SkillDetail,
+  SkillFile,
+  CreateSkillRequest,
+  CreateSkillResponse,
 } from '@/types';
 
 // API configuration
@@ -1448,3 +1453,53 @@ export async function getPodEvents(
     `/sandbox/${encodeURIComponent(namespace)}/pods/${encodeURIComponent(agentName)}/events`,
   );
 }
+
+/**
+ * Skill service
+ */
+export const skillService = {
+  async list(namespace: string, query?: string): Promise<Skill[]> {
+    const params = new URLSearchParams({ namespace });
+    if (query) {
+      params.append('q', query);
+    }
+    const response = await apiFetch<ApiListResponse<Skill>>(`/skills?${params.toString()}`);
+    return response.items;
+  },
+
+  async get(namespace: string, name: string): Promise<SkillDetail> {
+    return apiFetch(`/skills/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`);
+  },
+
+  async getFile(namespace: string, name: string, filePath: string): Promise<SkillFile> {
+    return apiFetch(
+      `/skills/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/files/${encodeURIComponent(filePath)}`
+    );
+  },
+
+  async create(data: CreateSkillRequest): Promise<CreateSkillResponse> {
+    return apiFetch('/skills', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async incrementUsage(namespace: string, name: string): Promise<Skill> {
+    return apiFetch(
+      `/skills/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/usage`,
+      {
+        method: 'POST',
+      }
+    );
+  },
+
+  async delete(namespace: string, name: string): Promise<{ success: boolean; message: string }> {
+    return apiFetch(
+      `/skills/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
+      {
+        method: 'DELETE',
+      }
+    );
+  },
+};
+

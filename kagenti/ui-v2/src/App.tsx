@@ -20,6 +20,9 @@ import { ObservabilityPage } from './pages/ObservabilityPage';
 import { ImportAgentPage } from './pages/ImportAgentPage';
 import { ImportToolPage } from './pages/ImportToolPage';
 import { AdminPage } from './pages/AdminPage';
+import { SkillCatalogPage } from './pages/SkillCatalogPage';
+import { SkillDetailPage } from './pages/SkillDetailPage';
+import { ImportSkillPage } from './pages/ImportSkillPage';
 import { IntegrationsPage } from './pages/IntegrationsPage';
 import { IntegrationDetailPage } from './pages/IntegrationDetailPage';
 import { AddIntegrationPage } from './pages/AddIntegrationPage';
@@ -104,6 +107,30 @@ function App() {
           element={
             <ProtectedRoute>
               <ToolDetailPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/skills"
+          element={
+            <ProtectedRoute>
+              <SkillCatalogPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/skills/:namespace/:name"
+          element={
+            <ProtectedRoute>
+              <SkillDetailPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/skills/import"
+          element={
+            <ProtectedRoute>
+              <ImportSkillPage />
             </ProtectedRoute>
           }
         />

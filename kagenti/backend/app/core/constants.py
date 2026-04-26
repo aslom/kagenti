@@ -50,6 +50,8 @@ KAGENTI_OPERATOR_LABEL_NAME = "kagenti-operator"
 # Resource types
 RESOURCE_TYPE_AGENT = "agent"
 RESOURCE_TYPE_TOOL = "tool"
+RESOURCE_TYPE_SKILL = "skill"
+
 
 # Protocol values
 VALUE_PROTOCOL_A2A = "a2a"
@@ -158,6 +160,15 @@ DEFAULT_ENV_VARS = [
     {"name": "UV_CACHE_DIR", "value": "/app/.cache/uv"},
 ]
 
+
+# Skill management constants
+SKILL_TYPE_LABEL = "kagenti.io/type"
+SKILL_TYPE_VALUE = "skill"
+SKILL_CATEGORY_LABEL = "kagenti.io/category"
+SKILL_DESCRIPTION_ANNOTATION = "kagenti.io/description"
+SKILL_ORIGIN_ANNOTATION = "kagenti.io/origin"
+SKILL_USAGE_ANNOTATION = "kagenti.io/usage-count"
+SKILL_STATUS_READY = "Ready"
 # Environment variable name for the agent endpoint (the agent card URL for the agent)
 AGENT_ENDPOINT = "AGENT_ENDPOINT"
 

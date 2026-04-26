@@ -39,6 +39,7 @@ from app.routers import (  # pylint: disable=wrong-import-position
     auth,
     chat,
     shipwright,
+    skills,
 )
 
 # Conditionally import feature-flagged modules.
@@ -165,6 +166,7 @@ app.include_router(auth.router, prefix="/api/v1")
 app.include_router(namespaces.router, prefix="/api/v1")
 app.include_router(agents.router, prefix="/api/v1")
 app.include_router(tools.router, prefix="/api/v1")
+app.include_router(skills.router, prefix="/api/v1")
 app.include_router(config.router, prefix="/api/v1")
 app.include_router(chat.router, prefix="/api/v1")
 app.include_router(shipwright.router, prefix="/api/v1")
