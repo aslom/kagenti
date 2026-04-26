@@ -27,7 +27,7 @@ import {
   Label,
   Spinner,
 } from '@patternfly/react-core';
-import { PlusCircleIcon, TrashIcon, DownloadIcon, GithubIcon } from '@patternfly/react-icons';
+import { PlusCircleIcon, TrashIcon, GithubIcon } from '@patternfly/react-icons';
 import { useMutation } from '@tanstack/react-query';
 
 import { skillService } from '@/services/api';
@@ -332,7 +332,7 @@ export const ImportSkillPage: React.FC = () => {
                       variant="link"
                       icon={<PlusCircleIcon />}
                       onClick={addFile}
-                      isSmall
+                      size="sm"
                     >
                       Add File
                     </Button>

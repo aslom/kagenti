@@ -31,7 +31,6 @@ import {
   FormGroup,
 } from '@patternfly/react-core';
 import {
-  CogIcon,
   ExclamationTriangleIcon,
   TrashIcon,
 } from '@patternfly/react-icons';

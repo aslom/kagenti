@@ -140,11 +140,10 @@ export const SkillCatalogPage: React.FC = () => {
               {skills.map((skill: Skill) => (
                 <Tr
                   key={`${skill.namespace}/${skill.resourceName}`}
-                  isHoverable
-                  isClickable
-                  onRowClick={() =>
+                  onClick={() =>
                     navigate(`/skills/${skill.namespace}/${skill.resourceName}`)
                   }
+                  style={{ cursor: 'pointer' }}
                 >
                   <Td dataLabel="Name">
                     <strong>{skill.name}</strong>
