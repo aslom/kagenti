@@ -1,7 +1,7 @@
 # ADK Agent (Google Agent Development Kit)
 
 > Back to [agent catalog](README.md) | [main doc](../openshell-integration.md)
-
+>
 > **Type:** Custom A2A
 > **Framework:** Google ADK + LiteLLM
 > **LLM:** LiteMaaS (llama-scout-17b)
@@ -133,7 +133,60 @@ network_policies:
         port: 443
 ```
 
-## 9. Testing Status
+## 9. Skill Execution
+
+The ADK agent executes Kagenti skills by receiving the skill instructions
+as part of the A2A prompt. The test infrastructure reads skill markdown from
+`.claude/skills/<name>/SKILL.md` and embeds it in the `message/send` request.
+
+### Supported Skills
+
+| Skill | Test | Status | How It Works |
+|-------|------|--------|-------------|
+| PR Review | `test_pr_review__adk_agent` | **PASS** | Skill markdown from `github:pr-review` injected into prompt; agent uses `review_pr` tool |
+| RCA | `test_rca__adk_agent` | **PASS** | Skill markdown from `rca:ci` injected; agent analyzes CI logs |
+| Security Review | `test_security_review__adk_agent` | **PASS** | Prompt-based; agent reviews K8s manifests for security issues |
+| Real GitHub PR | `test_review_real_github_pr__adk` | **PASS** | Fetches actual PR #1300 diff via GitHub API, reviews with LLM |
+| TDD | Not tested | — | ADK can execute `test:review` skill via prompt injection |
+| Docs Review | Not tested | — | ADK can execute `docs:review` skill via prompt injection |
+
+### Running Skills Manually
+
+```bash
+# Port-forward to ADK agent
+kubectl port-forward -n team1 svc/adk-agent 8001:8000 &
+
+# PR Review skill
+curl -s -X POST http://localhost:8001/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0", "id": "1", "method": "message/send",
+    "params": {"message": {"role": "user",
+      "parts": [{"type": "text", "text": "Review this PR diff for security issues:\n\n```diff\n- return os.popen(cmd).read()\n+ result = subprocess.run(cmd, shell=True)\n```"}]
+    }}
+  }' | python3 -m json.tool
+
+# RCA skill
+curl -s -X POST http://localhost:8001/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0", "id": "2", "method": "message/send",
+    "params": {"message": {"role": "user",
+      "parts": [{"type": "text", "text": "Root cause analysis: test_login failed with 200 != 302 after auth middleware JWT expiry change"}]
+    }}
+  }' | python3 -m json.tool
+
+kill %1
+```
+
+### Prerequisites
+
+- LiteLLM model proxy running in `team1` (provides OpenAI-compatible endpoint)
+- `OPENSHELL_LLM_AVAILABLE=true` for E2E tests
+- `.env.maas` with LiteMaaS credentials (or substitute your LLM endpoint)
+
+## 10. Testing Status
+
 
 | Test File | Tests | Pass | Skip | Notes |
 |-----------|-------|------|------|-------|
@@ -143,7 +196,7 @@ network_policies:
 | test_03_credential_security | 4 | 4 | 0 | secretKeyRef, no hardcoded keys |
 | test_06_conversation_resume | 2 | 0 | 2 | Destructive-gated |
 
-## 10. Sandbox Deployment Models
+## 11. Sandbox Deployment Models
 
 | Model | Supported | Notes |
 |-------|-----------|-------|

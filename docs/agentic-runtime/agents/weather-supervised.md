@@ -1,7 +1,7 @@
 # Weather Agent (Supervised)
 
 > Back to [agent catalog](README.md) | [main doc](../openshell-integration.md)
-
+>
 > **Type:** Custom A2A
 > **Framework:** LangGraph + OpenShell Supervisor
 > **LLM:** None
@@ -114,7 +114,69 @@ sequenceDiagram
     Note over OPA Proxy: Next request to example.com: ALLOW
 ```
 
-## 7. Testing Status
+## 7. Skill Execution
+
+**Not yet configured** — the weather-supervised agent currently has no LLM
+connected, so skill tests are skipped. The supervisor itself does not prevent
+LLM use — it's an isolation layer, not an LLM constraint.
+
+All skill tests are explicitly skipped with reason `no_llm`:
+
+| Skill | Test | Status | Reason |
+|-------|------|--------|--------|
+| PR Review | `test_pr_review__weather_supervised__no_llm` | **SKIP** | No LLM configured |
+| RCA | `test_rca__weather_supervised__no_llm` | **SKIP** | No LLM configured |
+| Security Review | `test_security_review__weather_supervised` | **SKIP** | No LLM configured |
+
+### Enabling LLM Skills on This Agent
+
+The weather-supervised agent uses LangGraph, which supports LLM reasoning.
+To enable skill execution, add LiteLLM credentials via the supervisor's
+OPA egress policy:
+
+1. **Add LiteLLM endpoint to OPA policy** (`policy-data.yaml`):
+   ```yaml
+   network_policies:
+     litellm:
+       endpoints:
+         - host: litellm-model-proxy.team1.svc.cluster.local
+           port: 4000
+           access: full
+   ```
+
+2. **Inject LLM env vars** (via LiteLLM virtual key or OpenShell provider):
+   ```yaml
+   env:
+   - name: OPENAI_API_KEY
+     valueFrom:
+       secretKeyRef:
+         name: litellm-virtual-keys
+         key: api-key
+   - name: OPENAI_API_BASE
+     value: "http://litellm-model-proxy.team1.svc.cluster.local:4000/v1"
+   ```
+
+3. **Update agent code** to use LLM for reasoning (currently pure tool-calling)
+
+This would create the most interesting test target: a **Tier 2 agent that
+runs skills under full supervisor security** (Landlock + seccomp + netns +
+OPA egress + credential isolation).
+
+### Alternative: Supervised ADK or Claude SDK Agent
+
+Instead of modifying the weather agent, deploy an existing LLM-capable
+agent (ADK or Claude SDK) with the supervisor as entrypoint. This gives
+skill execution + security enforcement without code changes to the weather
+agent. The multi-stage Dockerfile pattern is already proven:
+
+```dockerfile
+FROM ghcr.io/nvidia/openshell/supervisor:latest AS supervisor
+FROM adk-agent:latest
+COPY --from=supervisor /usr/local/bin/openshell-sandbox /usr/local/bin/
+ENTRYPOINT ["/usr/local/bin/openshell-sandbox", "--", ...]
+```
+
+## 8. Testing Status
 
 | Test File | Tests | Pass | Skip | Notes |
 |-----------|-------|------|------|-------|
@@ -123,7 +185,7 @@ sequenceDiagram
 | test_02_a2a_connectivity | 1 | 1 | 0 | kubectl exec hello |
 | test_05_multiturn | 2 | 1 | 1 | exec-based multi-turn |
 
-## 8. Sandbox Deployment Models
+## 9. Sandbox Deployment Models
 
 | Model | Supported | Notes |
 |-------|-----------|-------|

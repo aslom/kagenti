@@ -1,7 +1,7 @@
 # Weather Agent
 
 > Back to [agent catalog](README.md) | [main doc](../openshell-integration.md)
-
+>
 > **Type:** Custom A2A
 > **Framework:** LangGraph + MCP
 > **LLM:** None (pure tool-calling)

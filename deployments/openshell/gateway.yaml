@@ -67,14 +67,12 @@ spec:
         - name: tmp
           mountPath: /tmp
         livenessProbe:
-          httpGet:
-            path: /healthz
+          tcpSocket:
             port: grpc-http
           initialDelaySeconds: 10
           periodSeconds: 15
         readinessProbe:
-          httpGet:
-            path: /readyz
+          tcpSocket:
             port: grpc-http
           initialDelaySeconds: 5
           periodSeconds: 10

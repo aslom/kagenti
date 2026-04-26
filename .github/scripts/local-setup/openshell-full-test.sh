@@ -239,7 +239,10 @@ fi
 log_phase "PHASE 3: Deploy OpenShell Gateway"
 
 log_step "Applying OpenShell manifests (kubectl apply -k)..."
-kubectl apply -k deployments/openshell/ 2>&1 | grep -v "^Warning:"
+kubectl apply -k deployments/openshell/ --server-side --force-conflicts 2>&1 | grep -v "^Warning:" || {
+    log_warn "Server-side apply failed, retrying with --validate=false..."
+    kubectl apply -k deployments/openshell/ --validate=false 2>&1 | grep -v "^Warning:"
+}
 
 log_step "Waiting for openshell-system pods to be ready..."
 kubectl wait --for=condition=ready pod --all -n openshell-system --timeout=180s 2>/dev/null || {
@@ -395,7 +398,7 @@ if [ "$SKIP_AGENTS" = "false" ]; then
         LITEMAAS_KEY="${MAAS_LLAMA4_API_KEY:-}"
         LITEMAAS_MODEL="${MAAS_LLAMA4_MODEL:-llama-scout-17b}"
 
-        if ! kubectl get deploy "$LITELLM_PROXY_NAME" -n team1 >/dev/null 2>&1; then
+        if true; then
             log_step "Deploying LiteLLM model proxy with model aliases..."
             kubectl apply -f - <<EOLITELLM
 apiVersion: v1
@@ -411,36 +414,43 @@ data:
           model: "openai/$LITEMAAS_MODEL"
           api_base: "$LITEMAAS_URL"
           api_key: "$LITEMAAS_KEY"
+          use_chat_completions_api: true
       - model_name: "gpt-4o"
         litellm_params:
           model: "openai/$LITEMAAS_MODEL"
           api_base: "$LITEMAAS_URL"
           api_key: "$LITEMAAS_KEY"
+          use_chat_completions_api: true
       - model_name: "gpt-4"
         litellm_params:
           model: "openai/$LITEMAAS_MODEL"
           api_base: "$LITEMAAS_URL"
           api_key: "$LITEMAAS_KEY"
+          use_chat_completions_api: true
       - model_name: "gpt-5-nano"
         litellm_params:
           model: "openai/$LITEMAAS_MODEL"
           api_base: "$LITEMAAS_URL"
           api_key: "$LITEMAAS_KEY"
+          use_chat_completions_api: true
       - model_name: "gpt-5"
         litellm_params:
           model: "openai/$LITEMAAS_MODEL"
           api_base: "$LITEMAAS_URL"
           api_key: "$LITEMAAS_KEY"
+          use_chat_completions_api: true
       - model_name: "gpt-5-mini"
         litellm_params:
           model: "openai/$LITEMAAS_MODEL"
           api_base: "$LITEMAAS_URL"
           api_key: "$LITEMAAS_KEY"
+          use_chat_completions_api: true
       - model_name: "$LITEMAAS_MODEL"
         litellm_params:
           model: "openai/$LITEMAAS_MODEL"
           api_base: "$LITEMAAS_URL"
           api_key: "$LITEMAAS_KEY"
+          use_chat_completions_api: true
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -462,7 +472,7 @@ spec:
     spec:
       containers:
       - name: litellm
-        image: ghcr.io/berriai/litellm:main-v1.63.14-stable
+        image: ghcr.io/berriai/litellm:main-v1.83.10-stable
         args: ["--config", "/config/config.yaml", "--port", "4000"]
         ports:
         - containerPort: 4000
@@ -470,10 +480,10 @@ spec:
         resources:
           requests:
             cpu: 100m
-            memory: 256Mi
+            memory: 512Mi
           limits:
             cpu: 500m
-            memory: 512Mi
+            memory: 1Gi
         readinessProbe:
           tcpSocket:
             port: 4000
@@ -505,8 +515,6 @@ EOLITELLM
             kubectl rollout status "deploy/$LITELLM_PROXY_NAME" -n team1 --timeout=120s 2>/dev/null || {
                 log_warn "LiteLLM proxy rollout not complete"
             }
-        else
-            log_step "LiteLLM model proxy already deployed"
         fi
 
         # Patch agents to route through LiteLLM proxy

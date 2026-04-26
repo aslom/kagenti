@@ -1,7 +1,7 @@
 # OpenShell OpenCode Sandbox
 
 > Back to [agent catalog](README.md) | [main doc](../openshell-integration.md)
-
+>
 > **Type:** Builtin Sandbox
 > **Framework:** OpenCode CLI (open-source)
 > **LLM:** OpenAI-compatible (works with LiteMaaS)
@@ -142,23 +142,99 @@ This is the **best candidate for testing builtin sandbox skill execution**.
 
 Same as openshell-claude — all supervisor protection layers active in the base image.
 
-## 9. Testing Status
+## 9. Skill Execution
+
+OpenCode uses OpenAI-compatible APIs and can route through LiteLLM. The
+`run_opencode_in_sandbox()` helper in [`conftest.py`](../../../kagenti/tests/e2e/openshell/conftest.py)
+creates a Sandbox CR, injects `OPENAI_API_KEY` from the `litellm-virtual-keys`
+secret, and runs `opencode run` via `kubectl exec`.
+
+### Supported Skills (Blocked — `/v1/responses` API)
+
+| Skill | Test | Status | Blocker |
+|-------|------|--------|---------|
+| PR Review | `test_pr_review__openshell_opencode` | **SKIP** | OpenCode calls `/v1/responses` API, not `/v1/chat/completions`. LiteLLM doesn't proxy this endpoint. |
+| RCA | `test_rca__openshell_opencode` | **SKIP** | Same `/v1/responses` blocker |
+| Security Review | `test_security_review__openshell_opencode` | **SKIP** | Same blocker |
+| Real GitHub PR | `test_review_real_github_pr__opencode` | **SKIP** | Same blocker |
+
+### `/v1/responses` API — LiteLLM Version Requirement
+
+OpenCode internally uses the [OpenAI Responses API](https://platform.openai.com/docs/api-reference/responses)
+(`POST /v1/responses`) for both session title generation and main inference.
+
+LiteLLM **does** support `/v1/responses` since v1.60+
+([docs](https://docs.litellm.ai/docs/response_api)), but our original
+deployment (v1.63.14) had a bug in the handler (500 error). Upgrading to
+**v1.83.10+** fixes this.
+
+**Requirements for OpenCode to work:**
+1. LiteLLM v1.83.10+ (fixes `/v1/responses` handler bug)
+2. Memory limit ≥ 1Gi (newer LiteLLM requires more memory)
+3. Model aliases including `gpt-5-nano` (OpenCode uses internally for titles)
+4. Stable Istio mesh enrollment (pod-to-pod mTLS after fresh deploy)
+
+### How to Test Manually (When Blocker Is Resolved)
+
+```bash
+# The conftest helper does this automatically, but for manual testing:
+
+# 1. Create sandbox with OpenCode + LiteLLM credentials
+kubectl apply -f - <<EOF
+apiVersion: agents.x-k8s.io/v1alpha1
+kind: Sandbox
+metadata:
+  name: opencode-test
+  namespace: team1
+spec:
+  podTemplate:
+    spec:
+      containers:
+      - name: sandbox
+        image: ghcr.io/nvidia/openshell-community/sandboxes/base:latest
+        env:
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: litellm-virtual-keys
+              key: api-key
+        - name: OPENAI_BASE_URL
+          value: "http://litellm-model-proxy.team1.svc.cluster.local:4000/v1"
+EOF
+
+# 2. Wait for pod, then exec
+kubectl wait -n team1 sandbox/opencode-test --for=jsonpath='{.status.phase}'=Running --timeout=60s
+kubectl exec -n team1 sandbox-opencode-test-0 -- \
+  opencode run -m openai/gpt-4o-mini "Review: def f(x): eval(x)"
+```
+
+### Via OpenShell Provider (Once TLS + Ingress Enabled)
+
+```bash
+openshell provider create --name kagenti-litellm \
+  --type generic \
+  --credential "OPENAI_API_KEY=$(kubectl get secret litellm-virtual-keys \
+    -n team1 -o jsonpath='{.data.api-key}' | base64 -d)"
+
+openshell sandbox create --name opencode-test \
+  --provider kagenti-litellm \
+  --policy /tmp/policy-litellm.yaml \
+  --no-auto-providers
+
+# Inside sandbox:
+export OPENAI_BASE_URL="http://litellm-model-proxy.team1.svc.cluster.local:4000/v1"
+opencode run -m openai/gpt-4o-mini "Review this code for security issues: ..."
+```
+
+## 10. Testing Status
 
 | Test File | Tests | Pass | Skip | Notes |
 |-----------|-------|------|------|-------|
 | test_04_sandbox_lifecycle | 1 | 1 | 0 | Sandbox CR created |
-| test_07_skill_execution | 3 | 0 | 3 | Needs ExecSandbox adapter or gateway provider injection |
+| test_07_skill_execution | 4 | 0 | 4 | `/v1/responses` API blocker |
 | test_10_workspace_persistence | 2 | 1 | 1 | PVC write passes; sandbox creation skips |
 
-### How to enable skill execution tests
-
-OpenCode + LiteMaaS should work. The investigation path:
-1. Create a sandbox with the base image
-2. `kubectl exec` and check `env | grep OPENAI` (verify gateway injects credentials)
-3. Try `opencode -p "Review: def f(x): eval(x)" -f json -q`
-4. If credentials are injected and OpenCode responds, enable the skill tests
-
-## 10. Sandbox Deployment Models
+## 11. Sandbox Deployment Models
 
 | Model | Supported | Notes |
 |-------|-----------|-------|

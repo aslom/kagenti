@@ -1,7 +1,7 @@
 # Claude SDK Agent
 
 > Back to [agent catalog](README.md) | [main doc](../openshell-integration.md)
-
+>
 > **Type:** Custom A2A
 > **Framework:** Anthropic SDK / OpenAI-compatible (httpx)
 > **LLM:** LiteMaaS (llama-scout-17b)
@@ -81,7 +81,62 @@ N/A — no workspace.
 | Anthropic API | Claude messages | **Yes** | Native SDK |
 | Budget Proxy | OpenAI-compat | **Yes** | Default config |
 
-## 8. Testing Status
+## 8. Skill Execution
+
+The Claude SDK agent is the **most capable skill executor** in the PoC — it
+supports all skill types and has the most passing skill tests. Skills are
+injected by embedding the skill markdown (from `.claude/skills/<name>/SKILL.md`)
+into the A2A prompt.
+
+### Supported Skills
+
+| Skill | Test | Status | How It Works |
+|-------|------|--------|-------------|
+| PR Review | `test_pr_review__claude_sdk_agent` | **PASS** | Skill markdown from `github:pr-review` injected into prompt |
+| RCA | `test_rca__claude_sdk_agent` | **PASS** | Skill markdown from `rca:ci` injected; analyzes CI failure logs |
+| Security Review | `test_security_review__claude_sdk_agent` | **PASS** | Prompt-based K8s manifest security analysis |
+| Real GitHub PR | `test_review_real_github_pr__claude_sdk` | **PASS** | Fetches PR #1300 diff via GitHub API, reviews with LLM |
+| RCA CI Logs | `test_rca_style_log_analysis__claude_sdk` | **PASS** | Analyzes real CI log output for root causes |
+| Code Generation | `test_code_generation__claude_sdk` | **PASS** | Generates Python code from natural language prompt |
+| TDD | Not tested | — | Can execute `test:review` skill via prompt injection |
+| Docs Review | Not tested | — | Can execute `docs:review` skill via prompt injection |
+
+### Running Skills Manually
+
+```bash
+# Port-forward to Claude SDK agent
+kubectl port-forward -n team1 svc/claude-sdk-agent 8002:8000 &
+
+# PR Review skill
+curl -s -X POST http://localhost:8002/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0", "id": "1", "method": "message/send",
+    "params": {"message": {"role": "user",
+      "parts": [{"type": "text", "text": "Review this code change for issues:\n\n```diff\n- password = request.form[\"password\"]\n+ password = hashlib.md5(request.form[\"password\"]).hexdigest()\n```"}]
+    }}
+  }' | python3 -m json.tool
+
+# RCA with real CI log
+curl -s -X POST http://localhost:8002/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0", "id": "2", "method": "message/send",
+    "params": {"message": {"role": "user",
+      "parts": [{"type": "text", "text": "Analyze this CI failure:\n\nERROR: Connection refused to postgres:5432\nFATAL: role \"test_user\" does not exist\n\nContext: This started after we upgraded the PostgreSQL Helm chart from 14.x to 15.x"}]
+    }}
+  }' | python3 -m json.tool
+
+kill %1
+```
+
+### Prerequisites
+
+- LiteLLM model proxy running in `team1`
+- `OPENSHELL_LLM_AVAILABLE=true` for E2E tests
+- `.env.maas` with LiteMaaS credentials (or substitute your LLM endpoint)
+
+## 9. Testing Status
 
 | Test File | Tests | Pass | Skip | Notes |
 |-----------|-------|------|------|-------|
@@ -89,7 +144,7 @@ N/A — no workspace.
 | test_05_multiturn | 3 | 2 | 1 | Sequential + isolation pass; continuity skips |
 | test_07_skill_execution | 7 | 5 | 2 | PR review, RCA, security, real GH PR, RCA logs |
 
-## 9. Sandbox Deployment Models
+## 10. Sandbox Deployment Models
 
 | Model | Supported | Notes |
 |-------|-----------|-------|

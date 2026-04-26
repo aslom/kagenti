@@ -1,7 +1,7 @@
 # OpenShell Claude Code Sandbox
 
 > Back to [agent catalog](README.md) | [main doc](../openshell-integration.md)
-
+>
 > **Type:** Builtin Sandbox
 > **Framework:** Claude Code CLI (Anthropic)
 > **LLM:** Anthropic API (requires real API key)
@@ -163,7 +163,84 @@ All supervisor protection layers are active in the base image:
 | Process | Seccomp BPF | Dangerous syscalls blocked |
 | Inference | Credential stripping | Gateway injects Anthropic key |
 
-## 9. Testing Status
+## 9. Skill Execution
+
+Claude Code is the **highest-value skill target** because it natively reads
+`.claude/skills/` directories — no prompt injection needed. Kagenti skills
+can be mounted into the sandbox workspace and Claude Code discovers them
+automatically.
+
+### Supported Skills (Blocked — Needs Real Anthropic Key)
+
+| Skill | Test | Status | Blocker |
+|-------|------|--------|---------|
+| PR Review | `test_pr_review__openshell_claude` | **SKIP** | Real Anthropic API key required |
+| RCA | `test_rca__openshell_claude` | **SKIP** | Real Anthropic API key required |
+| Security Review | `test_security_review__openshell_claude` | **SKIP** | Real Anthropic API key required |
+| TDD | Not tested | — | Same blocker |
+| Docs Review | Not tested | — | Same blocker |
+
+### Why Claude Code Can't Use LiteLLM
+
+Claude Code validates model names against Anthropic's model catalog at startup.
+It **cannot** use OpenAI-compatible proxies (LiteMaaS, LiteLLM, Ollama) because:
+1. The CLI sends requests to the Anthropic messages API format, not OpenAI format
+2. It validates that the model ID matches `claude-*` patterns
+3. It checks for a valid `ANTHROPIC_API_KEY` (not `OPENAI_API_KEY`)
+
+### Path to Enabling Skills (Paolo's Provider Workflow)
+
+Once TLS + ingress are configured (see [architecture alignment](../../plans/2026-04-25-architecture-alignment-review.md#4-openshell-provider-mechanism--zero-trust-credential-delivery)):
+
+```bash
+# 1. Create provider with real Anthropic key (or LiteLLM with Anthropic routing)
+openshell provider create --name anthropic \
+  --type generic \
+  --credential "ANTHROPIC_AUTH_TOKEN=<real-anthropic-key>"
+
+# 2. Policy allowing Anthropic API (or your LiteLLM endpoint)
+cat > /tmp/policy-anthropic.yaml << 'EOF'
+version: 1
+network_policies:
+  anthropic:
+    name: Anthropic API
+    endpoints:
+      - host: api.anthropic.com
+        port: 443
+        access: full
+    binaries:
+      - path: /usr/local/bin/claude
+      - path: /usr/bin/node
+      - path: /usr/local/bin/node
+EOF
+
+# 3. Create Claude Code sandbox with provider
+openshell sandbox create --name skill-test \
+  --provider anthropic \
+  --policy /tmp/policy-anthropic.yaml \
+  --no-auto-providers
+
+# 4. Inside sandbox — skills are auto-discovered from .claude/skills/
+claude --print "Review this PR diff: ..."
+```
+
+### Alternative: LiteLLM with Anthropic Model Routing
+
+If your LiteLLM instance can route to a real Anthropic model:
+
+```yaml
+# LiteLLM config with real Anthropic model
+model_list:
+  - model_name: claude-sonnet-4-20250514
+    litellm_params:
+      model: anthropic/claude-sonnet-4-20250514
+      api_key: sk-ant-...
+```
+
+Then set `ANTHROPIC_BASE_URL` to the LiteLLM endpoint. Claude Code will
+see the `claude-*` model name and accept it.
+
+## 10. Testing Status
 
 | Test File | Tests | Pass | Skip | Notes |
 |-----------|-------|------|------|-------|
@@ -171,7 +248,7 @@ All supervisor protection layers are active in the base image:
 | test_07_skill_execution | 3 | 0 | 3 | Needs real Anthropic key |
 | test_10_workspace_persistence | 2 | 1 | 1 | PVC write passes; sandbox creation skips |
 
-## 10. Sandbox Deployment Models
+## 11. Sandbox Deployment Models
 
 | Model | Supported | Notes |
 |-------|-----------|-------|

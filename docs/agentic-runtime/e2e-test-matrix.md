@@ -53,7 +53,20 @@ Infrastructure:
 - `no LLM` — agent has no LLM capability (by design)
 - `no agent` — generic sandbox has no agent CLI
 - `Anthropic key` — Claude Code requires real Anthropic API key (Phase 2)
-- `/v1/responses API` — OpenCode uses OpenAI Responses API which LiteLLM doesn't proxy (needs LiteLLM update or OpenCode flag)
+- `/v1/responses API` — OpenCode uses OpenAI Responses API; requires LiteLLM v1.83.10+ (v1.63.14 had a handler bug)
+
+**Skill injection method per agent:**
+- `adk` / `claude_sdk` — skill markdown read from `.claude/skills/<name>/SKILL.md` and embedded in A2A `message/send` prompt
+- `os_claude` — native `.claude/skills/` discovery (highest fidelity, but needs Anthropic key)
+- `os_opencode` — `opencode run` with skill content in prompt via `kubectl exec`
+- Per-agent skill docs: [adk](agents/adk-agent.md#9-skill-execution), [claude_sdk](agents/claude-sdk-agent.md#8-skill-execution), [os_claude](agents/openshell-claude.md#9-skill-execution), [os_opencode](agents/openshell-opencode.md#9-skill-execution)
+
+**Available Kagenti skills** (from `.claude/skills/`):
+- `github:pr-review` — PR review against coding standards
+- `rca:ci` — Root cause analysis from CI logs
+- `test:review` — Test quality review
+- `docs:review` — Documentation review
+- `cve:scan` — Security vulnerability scanning
 
 ## A2A Connectivity Matrix
 
@@ -374,6 +387,35 @@ This requires a real Anthropic API key (Phase 2 provider integration).
 | workspace_survives_sandbox_restart | openshell_* | PVC data persists across sandbox recreate |
 | backend_resumes_from_pvc | openshell_* | Backend loads workspace state + DB history |
 | file_browser_reads_workspace | openshell_* | Kagenti UI FileBrowser can browse PVC |
+
+### AuthBridge Integration Tests (Phase 3)
+
+These tests validate combined AuthBridge + supervisor security. Depends on
+resolving the netns architectural conflict (see [Q9.1](questions.md#q91-how-should-authbridge-and-the-openshell-supervisor-coexist-in-tier-2-agents)).
+
+**Current state:** Supervised agents use `kagenti.io/inject: disabled`.
+Non-supervised agents (Tier 3) have AuthBridge injected and working.
+
+| Test | Agents | What it validates | Depends on |
+|------|--------|-------------------|------------|
+| authbridge_jwt_validates_inbound | Tier 2 | Inbound request rejected without valid JWT | Q9.1 resolution |
+| authbridge_token_exchange_outbound | Tier 2 | Outbound MCP call gets audience-scoped token | Q9.1 resolution |
+| supervisor_egress_plus_token | Tier 2 | OPA allows endpoint + AuthBridge adds token | Q9.1 + Q9.3 |
+| spiffe_identity_assigned | Tier 2 | SPIRE issues SVID for supervised agent | Q9.1 resolution |
+| combined_audit_trail | Tier 2 | OTel span + OPA decision log for same request | Q9.1 + Q5.1 |
+| mcp_tool_with_egress_policy | Tier 2 | Agent calls MCP tool, OPA allows, token exchanged | Q9.1 + Q9.3 |
+| tier3_authbridge_working | ALL Tier 3 | Verify AuthBridge injection works for non-supervised agents | Already possible |
+| tier3_jwt_inbound | ALL Tier 3 | JWT validation on inbound A2A requests | Already possible |
+
+**AuthBridge per agent tier (current):**
+
+| Agent | Tier | AuthBridge | Supervisor | Status |
+|-------|------|-----------|-----------|--------|
+| weather-agent | 3 | Injected | No | AuthBridge working |
+| adk-agent | 3 | Injected | No | AuthBridge working |
+| claude-sdk-agent | 3 | Injected | No | AuthBridge working |
+| weather-supervised | 2 | **Disabled** | Yes | `kagenti.io/inject: disabled` |
+| openshell sandboxes | 1 | Not present | Yes | Gateway-managed |
 
 ### Observability Integration
 

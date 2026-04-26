@@ -1,7 +1,6 @@
 # Pending Questions and Investigation Paths
 
-> Back to [main doc](openshell-integration.md)
->
+> Back to [main doc](openshell-integration.md) |
 > Sources: [Paolo's integration proposal](https://github.com/kagenti/kagenti/pull/1300),
 > PoC implementation (PR #1300), alignment analysis, codebase research
 
@@ -564,3 +563,101 @@ OpenCode validates model names against a hardcoded client-side list.
 Blocked by Istio ambient mTLS — LiteLLM needs proper mesh integration.
 
 **Related:** Q3.1 (inference routing), Q2.3 (credential model), Q1.1 (Tier 1)
+
+---
+
+## 9. AuthBridge + Supervisor Integration
+
+### Q9.1: How should AuthBridge and the OpenShell supervisor coexist in Tier 2 agents?
+
+**Status:** OPEN (architecture decision) | **Related:** Q1.1 (tiers), Q2.3 (credential model)
+
+AuthBridge (Kagenti's [identity sidecar](../authbridge-combined-sidecar.md))
+and the OpenShell supervisor provide complementary security layers:
+- AuthBridge: inbound JWT validation, outbound token exchange, SPIFFE identity
+- Supervisor: Landlock, seccomp, netns, OPA egress filtering, credential injection
+
+They cannot currently coexist because:
+1. AuthBridge's `proxy-init` installs iptables rules in the pod's default netns
+2. The supervisor moves the agent into a separate netns (10.200.0.2)
+3. Inbound traffic hits AuthBridge but can't reach the agent in the supervisor's netns
+4. Outbound credential injection conflicts: supervisor strips headers, AuthBridge injects tokens
+
+**Current PoC fix:** Supervised agents use `kagenti.io/inject: disabled` to
+prevent AuthBridge injection. This means supervised agents have no inbound
+JWT validation, no SPIFFE identity, and no outbound token exchange.
+
+**Resolution paths:**
+- **A) Supervisor `--setup-only`:** Landlock + seccomp only, no netns. AuthBridge handles networking.
+- **B) Socat bridge:** Keep netns, bridge traffic through socat sidecar. Configure AuthBridge upstream.
+- **C) RFC 0001 plugin:** AuthBridge becomes a supervisor subsystem (long-term).
+
+See [sandboxing-layers.md § AuthBridge + Supervisor Integration](sandboxing-layers.md#authbridge--supervisor-integration-phase-3) for the full analysis.
+
+### Q9.2: Should AuthBridge replace the OPA proxy for egress control?
+
+**Status:** OPEN | **Related:** Q9.1
+
+AuthBridge's Envoy already intercepts all outbound traffic. It could serve
+as the egress policy enforcement point via `ext_authz` with OPA, eliminating
+the need for the supervisor's netns-based OPA proxy entirely.
+
+**Advantages:**
+- No netns conflict — single network namespace
+- AuthBridge adds token exchange on top of OPA allow/deny
+- OTel spans on every egress request (observability)
+- Works with Istio ambient mesh (standard pod networking)
+
+**Disadvantages:**
+- Moves egress control from supervisor (kernel-enforced) to sidecar (userspace)
+- Agent could bypass Envoy by speaking raw TCP (supervisor's netns prevents this)
+- Requires OPA policy format compatible with ext_authz (different from supervisor's Rego)
+
+### Q9.3: How does AuthBridge's token exchange interact with the supervisor's credential injection?
+
+**Status:** OPEN | **Related:** Q2.3 (credential model), Q3.1 (inference routing)
+
+Two credential injection mechanisms exist:
+
+| Mechanism | How | When | For What |
+|-----------|-----|------|----------|
+| **Supervisor provider injection** | Gateway stores encrypted credential, supervisor injects at runtime | Pod startup | LLM API keys (ANTHROPIC_AUTH_TOKEN, OPENAI_API_KEY) |
+| **AuthBridge token exchange** | Envoy ext_proc calls Keycloak RFC 8693, gets audience-scoped token | Per-request | MCP tool auth (GitHub, Jira, Slack APIs) |
+
+These serve different use cases:
+- **LLM access:** Supervisor injects static API key (long-lived, per-provider)
+- **MCP tool access:** AuthBridge exchanges short-lived audience-scoped token (per-request)
+
+**Question:** Should LLM access eventually use AuthBridge too? If Keycloak holds
+LLM provider credentials and issues audience-scoped tokens, the supervisor's
+provider injection becomes unnecessary. This would unify all credential
+management under Keycloak/AuthBridge.
+
+### Q9.4: What use cases does combined AuthBridge + supervisor enable?
+
+**Status:** INVESTIGATING
+
+| Use Case | AuthBridge | Supervisor | Both |
+|----------|-----------|-----------|------|
+| Agent calls GitHub API via MCP | Token exchange → OAuth2 token | OPA policy allows github.com | Egress filtered + authenticated |
+| Multi-tenant agent isolation | JWT validates team membership | Landlock restricts filesystem | Identity + sandbox |
+| LLM call audit trail | OTel span with caller identity | OPA decision log | Full request lineage |
+| Agent-to-agent communication | SPIFFE mTLS between pods | Egress policy allows target | Mutual auth + policy |
+| CI/CD agent running in sandbox | — | Seccomp blocks dangerous syscalls | Identity + process isolation |
+
+**Phase 3 tests:** See [e2e-test-matrix.md § AuthBridge Integration](e2e-test-matrix.md#authbridge-integration-tests-phase-3)
+for the planned test matrix.
+
+### Q9.5: Which `authbridge-unified-config` ConfigMap version is required?
+
+**Status:** ANSWERED (2026-04-26 debugging)
+
+The Kagenti operator webhook (`0.2.0-alpha.24`) injects sidecars expecting
+`authbridge-unified-config` ConfigMap. Older clusters may have `authbridge-config`
+(different name). When the ConfigMap is missing, the `envoy-proxy` container
+crashes with `open /etc/authbridge/config.yaml: no such file or directory`.
+
+**Fix for supervised agents:** Use `kagenti.io/inject: disabled` label.
+**Fix for non-supervised agents:** Ensure the ConfigMap name matches the
+webhook version. The Kagenti Helm chart should create both ConfigMaps
+or the webhook should detect which exists.

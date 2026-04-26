@@ -215,6 +215,23 @@ graph TB
     end
 ```
 
+### AuthBridge Integration (Phase 3)
+
+Kagenti's [AuthBridge](../authbridge-combined-sidecar.md) and the OpenShell
+supervisor are complementary security layers that cannot currently coexist in
+the same pod. AuthBridge provides inbound JWT validation, outbound token
+exchange, and SPIFFE identity. The supervisor provides Landlock, seccomp,
+netns, and OPA egress filtering.
+
+**Current PoC:** Supervised agents disable AuthBridge injection
+(`kagenti.io/inject: disabled`) because the supervisor's network namespace
+breaks AuthBridge's iptables-based traffic interception.
+
+**Phase 3 target:** Combine both layers. See
+[sandboxing-layers.md § AuthBridge + Supervisor Integration](sandboxing-layers.md#authbridge--supervisor-integration-phase-3)
+for the resolution paths and [questions.md § 9](questions.md#9-authbridge--supervisor-integration)
+for open questions.
+
 ## 7. OpenShell RFC 0001
 
 OpenShell is being rearchitected via [RFC 0001](https://github.com/NVIDIA/OpenShell/pull/836)

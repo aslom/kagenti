@@ -312,10 +312,14 @@ BASE_IMAGE = "ghcr.io/nvidia/openshell-community/sandboxes/base:latest"
 def run_opencode_in_sandbox(
     prompt: str,
     namespace: str = "team1",
-    model: str = "openai/gpt-4o-mini",
+    model: str = "litellm/gpt-4o-mini",
     timeout_sec: int = 120,
 ) -> str | None:
     """Create a sandbox with OpenCode, run a prompt, return the output.
+
+    Uses the @ai-sdk/openai-compatible provider so OpenCode calls
+    /v1/chat/completions instead of /v1/responses (which LiteMaaS
+    doesn't support).
 
     Returns the OpenCode output text, or None if the sandbox failed to
     start or OpenCode failed to run.
@@ -405,6 +409,23 @@ spec:
             "--wait=false",
         )
         return None
+
+    opencode_config = (
+        '{"provider":{"litellm":{"npm":"@ai-sdk/openai-compatible",'
+        f'"options":{{"baseURL":"{litellm_url}"}},'
+        '"models":{"gpt-4o-mini":{}}}}}'
+    )
+    kubectl_run(
+        "exec",
+        pod_name,
+        "-n",
+        namespace,
+        "--",
+        "sh",
+        "-c",
+        f"mkdir -p $HOME/.config/opencode && echo '{opencode_config}' > $HOME/.config/opencode/config.json",
+        timeout=10,
+    )
 
     exec_result = kubectl_run(
         "exec",

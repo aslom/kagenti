@@ -1,35 +1,35 @@
-# Weather agent with OpenShell supervisor as entrypoint
-# The supervisor applies Landlock + seccomp before exec'ing the weather app
+# ADK agent with OpenShell supervisor — Tier 2 (LLM + security)
+# Tests skill execution under full supervisor security layers
 #
-# ConfigMap is created separately by the fulltest script from:
+# Policy ConfigMap created by fulltest script from:
 #   policy-data.yaml (sandbox config)
-#   sandbox-policy.rego (OPA rules from upstream OpenShell)
+#   sandbox-policy.rego (OPA rules)
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: weather-agent-supervised
+  name: adk-agent-supervised
   namespace: team1
   labels:
     kagenti.io/type: agent
-    app.kubernetes.io/name: weather-agent-supervised
+    app.kubernetes.io/name: adk-agent-supervised
     app.kubernetes.io/managed-by: openshell
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app.kubernetes.io/name: weather-agent-supervised
+      app.kubernetes.io/name: adk-agent-supervised
   template:
     metadata:
       labels:
         kagenti.io/type: agent
         kagenti.io/inject: disabled
-        app.kubernetes.io/name: weather-agent-supervised
+        app.kubernetes.io/name: adk-agent-supervised
     spec:
       serviceAccountName: openshell-supervisor
       containers:
       - name: agent
-        image: weather-agent-supervised:latest
+        image: adk-agent-supervised:latest
         imagePullPolicy: IfNotPresent
         command: ["/usr/local/bin/openshell-sandbox"]
         args:
@@ -40,28 +40,30 @@ spec:
         - "--log-level"
         - "info"
         - "--"
-        - "/bin/bash"
-        - "-c"
-        - "exec /app/.venv/bin/python3 -c 'from weather_service.agent import run; run()'"
+        - "python"
+        - "agent.py"
         securityContext:
           privileged: true
         env:
         - name: AGENT_NAME
-          value: "weather-agent-supervised"
+          value: "adk-agent-supervised"
         - name: PORT
           value: "8080"
         - name: HOST
           value: "0.0.0.0"
-        - name: UV_CACHE_DIR
-          value: "/tmp/uv-cache"
-        - name: HOME
-          value: "/tmp/home"
+        - name: LLM_MODEL
+          value: "openai/gpt-4o-mini"
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: litellm-virtual-keys
+              key: api-key
+        - name: OPENAI_API_BASE
+          value: "http://litellm-model-proxy.team1.svc:4000/v1"
         volumeMounts:
         - name: policy
           mountPath: /etc/openshell
           readOnly: true
-        - name: cache
-          mountPath: /.cache
         - name: tmp
           mountPath: /tmp
       # Bridges traffic from the pod network (default netns) into the
@@ -83,20 +85,18 @@ spec:
       volumes:
       - name: policy
         configMap:
-          name: weather-agent-supervised-policy
-      - name: cache
-        emptyDir: {}
+          name: adk-agent-supervised-policy
       - name: tmp
         emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: weather-agent-supervised
+  name: adk-agent-supervised
   namespace: team1
 spec:
   selector:
-    app.kubernetes.io/name: weather-agent-supervised
+    app.kubernetes.io/name: adk-agent-supervised
   ports:
   - port: 8080
     targetPort: 8080

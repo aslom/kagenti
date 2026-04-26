@@ -99,35 +99,46 @@ async def handle_jsonrpc(request: Request) -> JSONResponse:
         "security, performance, and best practices. "
         "Be concise and focus on the most impactful observations."
     )
-    try:
-        if _use_openai_format:
-            resp = _llm_client.post(
-                f"{_base_url}/chat/completions",
-                headers={"Authorization": f"Bearer {_api_key}"},
-                json={
-                    "model": _model,
-                    "max_tokens": 1024,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": text},
-                    ],
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            reply_text = data["choices"][0]["message"]["content"]
-        else:
-            response = _llm_client.messages.create(
-                model=_model,
-                max_tokens=1024,
-                system=system_prompt,
-                messages=[{"role": "user", "content": text}],
-            )
-            reply_text = response.content[0].text
-    except Exception as e:
-        import logging
+    import time
 
-        logging.getLogger(__name__).exception("LLM call failed")
+    reply_text = None
+    for attempt in range(3):
+        try:
+            if _use_openai_format:
+                resp = _llm_client.post(
+                    f"{_base_url}/chat/completions",
+                    headers={"Authorization": f"Bearer {_api_key}"},
+                    json={
+                        "model": _model,
+                        "max_tokens": 1024,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": text},
+                        ],
+                    },
+                    timeout=30.0,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                reply_text = data["choices"][0]["message"]["content"]
+            else:
+                response = _llm_client.messages.create(
+                    model=_model,
+                    max_tokens=1024,
+                    system=system_prompt,
+                    messages=[{"role": "user", "content": text}],
+                )
+                reply_text = response.content[0].text
+            break
+        except Exception as e:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "LLM call failed (attempt %d/3): %s", attempt + 1, e
+            )
+            if attempt < 2:
+                time.sleep(2 * (attempt + 1))
+    if reply_text is None:
         reply_text = "Error: LLM service temporarily unavailable. Please try again."
 
     task_id = str(uuid.uuid4())
