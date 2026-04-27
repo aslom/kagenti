@@ -69,17 +69,29 @@ spec:
       # Bridges traffic from the pod network (default netns) into the
       # supervisor's isolated network namespace where the agent listens.
       - name: port-bridge
-        image: alpine/socat:1.8.0.1
+        image: python:3.12-slim
+        imagePullPolicy: IfNotPresent
+        command: ["python3", "-c"]
         args:
-        - "TCP-LISTEN:8080,fork,reuseaddr"
-        - "TCP:10.200.0.2:8080"
+        - |
+          import socket, threading
+          def forward(src, dst):
+              try:
+                  while d := src.recv(4096):
+                      dst.sendall(d)
+              except: pass
+              finally: src.close(); dst.close()
+          srv = socket.socket(); srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+          srv.bind(('0.0.0.0', 8080)); srv.listen(32)
+          while True:
+              c, _ = srv.accept()
+              u = socket.socket(); u.connect(('10.200.0.2', 8080))
+              threading.Thread(target=forward, args=(c, u), daemon=True).start()
+              threading.Thread(target=forward, args=(u, c), daemon=True).start()
         ports:
         - containerPort: 8080
         securityContext:
-          runAsNonRoot: true
-          runAsUser: 65534
           allowPrivilegeEscalation: false
-          readOnlyRootFilesystem: true
           capabilities:
             drop: ["ALL"]
       volumes:
