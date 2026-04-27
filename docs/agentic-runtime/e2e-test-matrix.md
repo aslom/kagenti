@@ -7,6 +7,8 @@
 Every test category covers ALL agent types. Unsupported combinations are
 explicitly skipped with documented reasons and TODOs.
 
+### Currently Deployed Agents
+
 | Agent ID | Type | Tier | Protocol | LLM | Supervisor | Skill Support |
 |----------|------|------|----------|-----|------------|---------------|
 | `weather_agent` | Custom A2A | 3 | A2A JSON-RPC | No | No | N/A (no LLM) |
@@ -17,6 +19,49 @@ explicitly skipped with documented reasons and TODOs.
 | `openshell_claude` | Builtin sandbox | 1 | kubectl exec | Anthropic | Yes | Native `.claude/skills/` |
 | `openshell_opencode` | Builtin sandbox | 1 | kubectl exec | OpenAI-compat | Yes | Via `@ai-sdk/openai-compatible` |
 | `openshell_generic` | Builtin sandbox | 1 | kubectl exec | N/A | Yes | No agent |
+
+### Sandbox Compatibility Matrix (Builtin + NemoClaw Agents)
+
+Agents deployed into OpenShell sandboxes fall into three compatibility tiers
+based on how their security model interacts with the supervisor's Landlock,
+seccomp, netns, and credential isolation layers.
+
+**Composable agents** (delegate security to the environment) sandbox cleanly.
+**Exclusive agents** (implement their own perimeter) fight the sandbox.
+
+| Compatibility | Agents | Sandbox Behavior | Kagenti Skill Support |
+|--------------|--------|-----------------|----------------------|
+| **Works unmodified** | Claude Code, Codex, OpenCode, Copilot, Gemini CLI, Continue.dev | Composable security — delegates to environment | Claude: native `.claude/skills/`; Others: via prompt injection |
+| **Config only** | Windsurf, Augment, SWE-Agent, OpenHands, Roo Code | Needs proxy/endpoint config to route through supervisor | Via prompt injection once configured |
+| **Targeted fixes** | Amp, Cline, Aider | Credential writes or self-update conflict with Landlock | Possible after fixes |
+| **Full adapter ([NemoClaw](https://github.com/NVIDIA/NemoClaw))** | Cursor, Goose, OpenClaw | Own sandbox (Landlock/seccomp/SSRF) fights supervisor | Needs NemoClaw-style adapter layer |
+
+**NemoClaw agents** with manifests (`agents/*/manifest.yaml`):
+
+| Agent | Language | Inference | Health Probe | NemoClaw Status |
+|-------|----------|-----------|-------------|----------------|
+| [OpenClaw](https://github.com/NVIDIA/NemoClaw/tree/main/agents/openclaw) | Node.js | Gateway-managed, explicit proxy | `:18789` | Primary target |
+| [Hermes](https://github.com/NVIDIA/NemoClaw/tree/main/agents/hermes) | Python | Custom OpenAI-compat endpoint | `:8642/health` | Second agent |
+
+The NemoClaw [agent manifest](https://github.com/NVIDIA/NemoClaw/blob/main/agents/openclaw/manifest.yaml)
+format declares the integration contract: binary path, health probe, config
+directories (immutable vs writable), phone-home hosts, inference routing,
+credential handling, and package registry. This is effectively an **agent
+security manifest** — the contract between the agent and the sandbox.
+
+### Future: Agent Security Manifest Standard
+
+Without a standardized agent security manifest, each agent that implements
+its own security perimeter needs a dedicated adapter (NemoClaw for OpenClaw,
+potentially NemoCursor, NemoOpenHands, etc.). The manifest should declare:
+- SSRF behavior (does the agent reject proxies?)
+- Credential handling (writes to disk? environment only? token exchange?)
+- Network expectations (phone-home hosts, package registries)
+- Sandbox delegation (composable vs exclusive security model)
+
+Kagenti's test matrix validates agents across all tiers. Agents that "work
+by accident" today may break with future updates — validated images per
+version are needed for production deployments.
 
 ## Phase 1 PoC Test Results
 
