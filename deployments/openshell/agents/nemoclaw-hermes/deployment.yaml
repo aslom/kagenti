@@ -118,6 +118,8 @@ spec:
     spec:
       securityContext:
         runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
       containers:
@@ -167,8 +169,8 @@ spec:
         - name: config
           mountPath: /etc/nemoclaw
           readOnly: true
-        - name: hermes-data
-          mountPath: /sandbox/.hermes-data
+        - name: sandbox
+          mountPath: /sandbox
         - name: tmp
           mountPath: /tmp
       volumes:
@@ -176,7 +178,7 @@ spec:
         configMap:
           name: nemoclaw-hermes-config
           defaultMode: 0755
-      - name: hermes-data
+      - name: sandbox
         emptyDir: {}
       - name: tmp
         emptyDir: {}
