@@ -532,15 +532,35 @@ EOLITELLM
         log_warn "No .env.maas — LLM tests will skip, no LiteLLM proxy deployed"
     fi
 
+    # ── NemoClaw agents status ──────────────────────────────────────────
+    # NemoClaw agents (hermes, openclaw) are deployed alongside other agents
+    # via the manifest glob above. They use the OpenShell base image and will
+    # CrashLoopBackOff until proper NemoClaw images are built.
+    # TODO(nemoclaw-images): Build proper images — see deployment YAMLs for options.
+    NEMOCLAW_HEALTHY=false
+    if kubectl get deploy nemoclaw-hermes -n team1 >/dev/null 2>&1; then
+        log_step "NemoClaw agents deployed (checking readiness)..."
+        if kubectl rollout status deploy/nemoclaw-hermes -n team1 --timeout=60s 2>/dev/null && \
+           kubectl rollout status deploy/nemoclaw-openclaw -n team1 --timeout=60s 2>/dev/null; then
+            NEMOCLAW_HEALTHY=true
+            log_step "NemoClaw agents are healthy — enabling NemoClaw tests"
+        else
+            log_warn "NemoClaw agents not ready (expected until proper images are built)"
+            log_warn "Tests will skip NemoClaw-specific checks"
+        fi
+    fi
+
     # ── Wait for all rollouts to complete ─────────────────────────────
     # Brief delay to let K8s controller detect the env var changes
     # and start the rollout before we check status.
     sleep 5
     log_step "Waiting for agent rollouts to complete..."
     for deploy in $(kubectl get deploy -n team1 -l kagenti.io/type=agent -o name 2>/dev/null); do
-        kubectl rollout status "$deploy" -n team1 --timeout=180s 2>/dev/null || {
-            log_warn "$deploy rollout not complete"
-        }
+        # NemoClaw agents may CrashLoopBackOff — don't block on them
+        case "$deploy" in
+            *nemoclaw*) kubectl rollout status "$deploy" -n team1 --timeout=60s 2>/dev/null || log_warn "$deploy not ready (NemoClaw image pending)" ;;
+            *) kubectl rollout status "$deploy" -n team1 --timeout=180s 2>/dev/null || log_warn "$deploy rollout not complete" ;;
+        esac
     done
     # Extra wait for readiness probes to pass after rollout
     sleep 5
@@ -577,6 +597,12 @@ if [ "$SKIP_TEST" = "false" ]; then
                 break
             fi
         done
+    fi
+
+    # Enable NemoClaw tests if agents are healthy
+    if [ "${NEMOCLAW_HEALTHY:-false}" = "true" ]; then
+        export OPENSHELL_NEMOCLAW_ENABLED=true
+        log_step "NemoClaw tests enabled"
     fi
 
     TEST_DIR="kagenti/tests/e2e/openshell"

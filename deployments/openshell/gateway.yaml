@@ -32,6 +32,8 @@ spec:
         # Use a numeric UID (OCP requires numeric for runAsNonRoot verification)
         runAsNonRoot: true
         runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
       - name: gateway
         image: ghcr.io/nvidia/openshell/gateway:latest

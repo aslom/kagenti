@@ -26,6 +26,9 @@ spec:
         kagenti.io/inject: disabled
         app.kubernetes.io/name: weather-agent-supervised
     spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       serviceAccountName: openshell-supervisor
       containers:
       - name: agent
@@ -90,6 +93,8 @@ spec:
         - containerPort: 8080
         securityContext:
           allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
           capabilities:
             drop: ["ALL"]
       volumes:

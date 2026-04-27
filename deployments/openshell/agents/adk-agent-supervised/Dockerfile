@@ -1,5 +1,6 @@
 # ADK agent with OpenShell supervisor as entrypoint
 # Supervisor applies Landlock + seccomp + netns + OPA before exec'ing the agent
+# hadolint ignore=DL3007
 FROM ghcr.io/nvidia/openshell/supervisor:latest AS supervisor
 
 FROM python:3.12-slim

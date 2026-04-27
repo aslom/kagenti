@@ -13,5 +13,8 @@ resources:
 # Uncomment for production TLS (PoC uses --disable-tls):
 # - tls-secrets.yaml
 
+patches:
+- path: agent-sandbox-security-patch.yaml
+
 commonLabels:
   app.kubernetes.io/managed-by: kustomize

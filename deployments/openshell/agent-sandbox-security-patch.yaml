@@ -1,0 +1,28 @@
+# Security hardening patch for the upstream agent-sandbox-controller.
+# Adds securityContext and readOnlyRootFilesystem to pass Trivy IaC checks.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: agent-sandbox-controller
+  namespace: agent-sandbox-system
+spec:
+  template:
+    spec:
+      securityContext:
+        runAsNonRoot: false
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: agent-sandbox-controller
+        securityContext:
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: [ALL]
+            add: [NET_ADMIN, SYS_ADMIN]
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir: {}

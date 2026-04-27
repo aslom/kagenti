@@ -42,12 +42,17 @@ spec:
         kagenti.io/framework: AnthropicSDK
         app.kubernetes.io/name: claude-sdk-agent
     spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
       - name: agent
         image: claude-sdk-agent:latest
         imagePullPolicy: IfNotPresent
         securityContext:
           allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
           capabilities:
             drop: [ALL]
         env:

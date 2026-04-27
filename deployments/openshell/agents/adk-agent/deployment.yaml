@@ -42,12 +42,17 @@ spec:
         kagenti.io/framework: GoogleADK
         app.kubernetes.io/name: adk-agent
     spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
       - name: agent
         image: adk-agent:latest
         imagePullPolicy: IfNotPresent
         securityContext:
           allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
           capabilities:
             drop: [ALL]
         env:

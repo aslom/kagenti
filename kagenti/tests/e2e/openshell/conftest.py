@@ -172,6 +172,35 @@ def claude_sdk_agent_url(agent_namespace, agent_port):
         proc.wait()
 
 
+@pytest.fixture(scope="session")
+def nemoclaw_hermes_url(agent_namespace):
+    """Port-forward to NemoClaw Hermes agent (OpenAI-compatible API on 8642)."""
+    url, proc = _port_forward("nemoclaw-hermes", agent_namespace, 8642)
+    if not url:
+        pytest.skip("Cannot reach nemoclaw-hermes (not deployed or image missing)")
+    yield url
+    if proc:
+        proc.terminate()
+        proc.wait()
+
+
+@pytest.fixture(scope="session")
+def nemoclaw_openclaw_url(agent_namespace):
+    """Port-forward to NemoClaw OpenClaw agent (gateway API on 18789)."""
+    url, proc = _port_forward("nemoclaw-openclaw", agent_namespace, 18789)
+    if not url:
+        pytest.skip("Cannot reach nemoclaw-openclaw (not deployed or image missing)")
+    yield url
+    if proc:
+        proc.terminate()
+        proc.wait()
+
+
+def nemoclaw_enabled() -> bool:
+    """Check if NemoClaw agent tests are enabled."""
+    return os.getenv("OPENSHELL_NEMOCLAW_ENABLED", "").lower() == "true"
+
+
 # ---------------------------------------------------------------------------
 # A2A JSON-RPC helper
 # ---------------------------------------------------------------------------
@@ -527,7 +556,20 @@ ALL_A2A_AGENTS = [
     pytest.param("weather-agent-supervised", id="weather_supervised"),
 ]
 
-LLM_CAPABLE_AGENTS = {"adk-agent", "claude-sdk-agent"}
+# NemoClaw agents — OpenAI-compatible (hermes) and gateway (openclaw) APIs.
+# These do NOT speak A2A JSON-RPC; they have their own native APIs.
+# TODO(a2a-adapter): Wrap with A2A adapter so they join ALL_A2A_AGENTS.
+NEMOCLAW_AGENTS = [
+    pytest.param("nemoclaw-hermes", id="nemoclaw_hermes"),
+    pytest.param("nemoclaw-openclaw", id="nemoclaw_openclaw"),
+]
+
+LLM_CAPABLE_AGENTS = {
+    "adk-agent",
+    "claude-sdk-agent",
+    "nemoclaw-hermes",
+    "nemoclaw-openclaw",
+}
 
 ALL_SANDBOX_TYPES = [
     pytest.param(
@@ -579,6 +621,16 @@ AGENT_PROMPTS = {
         "What about Tokyo?",
         "Which is colder?",
     ],
+    "nemoclaw-hermes": [
+        "What is 2 + 2?",
+        "Multiply that by 3.",
+        "Is the result even or odd?",
+    ],
+    "nemoclaw-openclaw": [
+        "List 3 prime numbers.",
+        "Which is the largest?",
+        "Is it divisible by 2?",
+    ],
 }
 
 # Map agent name to fixture name (for parametrized tests)
@@ -586,6 +638,22 @@ FIXTURE_MAP = {
     "weather-agent": "weather_agent_url",
     "adk-agent": "adk_agent_url",
     "claude-sdk-agent": "claude_sdk_agent_url",
+}
+
+# NemoClaw agent port/protocol mapping
+NEMOCLAW_AGENT_CONFIG = {
+    "nemoclaw-hermes": {
+        "port": 8642,
+        "health_path": "/health",
+        "api_path": "/v1/chat/completions",
+        "protocol": "openai",
+    },
+    "nemoclaw-openclaw": {
+        "port": 18789,
+        "health_path": "/",
+        "api_path": "/",
+        "protocol": "gateway",
+    },
 }
 
 

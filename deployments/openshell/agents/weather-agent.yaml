@@ -78,12 +78,17 @@ spec:
         kagenti.io/framework: LangGraph
         app.kubernetes.io/name: weather-agent
     spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
       - name: agent
         image: ghcr.io/kagenti/agent-examples/weather_service:latest
         imagePullPolicy: Always
         securityContext:
           allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
           capabilities:
             drop: [ALL]
         env:
