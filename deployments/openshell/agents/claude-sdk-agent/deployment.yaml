@@ -44,6 +44,8 @@ spec:
     spec:
       securityContext:
         runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
       containers:
@@ -56,6 +58,8 @@ spec:
           capabilities:
             drop: [ALL]
         env:
+        - name: PYTHONDONTWRITEBYTECODE
+          value: "1"
         - name: AGENT_NAME
           value: "claude-sdk-agent"
         - name: PORT
