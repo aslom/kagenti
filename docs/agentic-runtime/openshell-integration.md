@@ -71,7 +71,7 @@ graph TB
 
 ## 3. Agent Deployment Tiers
 
-> **Detail:** [sandboxing-models.md](sandboxing-models.md) | **Per-agent:** [agents/README.md](agents/README.md) (detailed) | [agents.md](agents.md) (deployment quick-ref)
+> **Detail:** [sandboxing-models.md](sandboxing-models.md) | **Per-agent:** [agents/](agents/README.md)
 > **Open questions:** [questions.md](questions.md) Q1.1 — 3-tier architecture, Q2.3 — credential models, Q8.1 — port bridge
 
 Kagenti supports three deployment tiers for agents, from simplest to most secure.

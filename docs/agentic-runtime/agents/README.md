@@ -1,6 +1,6 @@
 # Agent Integration Catalog
 
-> Back to [main doc](../openshell-integration.md) | [deployment guide](../agents.md)
+> Back to [main doc](../openshell-integration.md)
 
 This directory contains one document per agent type/framework describing its
 capabilities, Kagenti integration points, and testing status.
