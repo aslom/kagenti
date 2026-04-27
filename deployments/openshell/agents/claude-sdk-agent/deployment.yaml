@@ -64,12 +64,12 @@ spec:
           value: "claude-sdk-agent"
         - name: PORT
           value: "8080"
-        # Anthropic model name via LiteLLM's model routing
+        # LiteLLM model alias — routed through the LiteLLM proxy
         - name: ANTHROPIC_MODEL
-          value: "anthropic/claude-sonnet-4-20250514"
-        # Point the Anthropic SDK at the Budget Proxy's Anthropic pass-through
+          value: "gpt-4o-mini"
+        # Point the Anthropic SDK at the LiteLLM proxy (OpenAI-compatible)
         - name: ANTHROPIC_BASE_URL
-          value: "http://llm-budget-proxy.team1.svc:8080/anthropic/v1"
+          value: "http://litellm-model-proxy.team1.svc:4000/v1"
         # Virtual key from the namespace secret
         - name: ANTHROPIC_API_KEY
           valueFrom:
