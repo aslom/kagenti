@@ -29,10 +29,9 @@ router = APIRouter(prefix="/config", tags=["config"])
 @router.get(
     "/features",
     response_model=FeatureFlagsResponse,
-    dependencies=[Depends(require_roles(ROLE_VIEWER))],
 )
 async def get_feature_flags() -> FeatureFlagsResponse:
-    """Return enabled feature flags for UI gating. Requires ROLE_VIEWER."""
+    """Return enabled feature flags for UI gating (public, no auth required)."""
     return FeatureFlagsResponse(
         sandbox=settings.kagenti_feature_flag_sandbox,
         integrations=settings.kagenti_feature_flag_integrations,

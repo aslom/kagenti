@@ -41,6 +41,7 @@ import { agentService, ShipwrightBuildConfig } from '@/services/api';
 import { NamespaceSelector } from '@/components/NamespaceSelector';
 import { EnvImportModal } from '@/components/EnvImportModal';
 import { BuildStrategySelector } from '@/components/BuildStrategySelector';
+import { useFeatureFlags } from '@/hooks/useFeatureFlags';
 
 // Example agent subfolders from the original UI
 const AGENT_EXAMPLES = [
@@ -107,6 +108,7 @@ interface ServicePort {
 
 export const ImportAgentPage: React.FC = () => {
   const navigate = useNavigate();
+  const features = useFeatureFlags();
 
   // Deployment method
   const [deploymentMethod, setDeploymentMethod] = useState<DeploymentMethod>('source');
@@ -163,7 +165,7 @@ export const ImportAgentPage: React.FC = () => {
   const [showImportModal, setShowImportModal] = useState(false);
 
   // Workload type
-  const [workloadType, setWorkloadType] = useState<'deployment' | 'statefulset' | 'job'>('deployment');
+  const [workloadType, setWorkloadType] = useState<'deployment' | 'statefulset' | 'job' | 'sandbox'>('deployment');
 
   // HTTPRoute/Route creation
   const [createHttpRoute, setCreateHttpRoute] = useState(false);
@@ -989,12 +991,17 @@ export const ImportAgentPage: React.FC = () => {
                 <FormSelect
                   id="workloadType"
                   value={workloadType}
-                  onChange={(_e, value) => setWorkloadType(value as 'deployment' | 'statefulset' | 'job')}
+                  onChange={(_e, value) => setWorkloadType(value as 'deployment' | 'statefulset' | 'job' | 'sandbox')}
                   aria-label="Workload type selector"
                 >
-                  <FormSelectOption value="deployment" label="Deployment (Recommended)" />
-                  <FormSelectOption value="statefulset" label="StatefulSet" />
-                  <FormSelectOption value="job" label="Job" />
+                  {[
+                    { value: 'deployment', label: 'Deployment (Recommended)' },
+                    { value: 'statefulset', label: 'StatefulSet' },
+                    { value: 'job', label: 'Job' },
+                    ...(features.agentSandbox ? [{ value: 'sandbox', label: 'Sandbox (agent-sandbox)' }] : []),
+                  ].map((opt) => (
+                    <FormSelectOption key={opt.value} value={opt.value} label={opt.label} />
+                  ))}
                 </FormSelect>
                 <FormHelperText>
                   <HelperText>
@@ -1002,6 +1009,7 @@ export const ImportAgentPage: React.FC = () => {
                       {workloadType === 'deployment' && 'Standard deployment for long-running agents with auto-restart'}
                       {workloadType === 'statefulset' && 'For stateful agents requiring stable network identity and persistent storage'}
                       {workloadType === 'job' && 'For batch/one-time agents that run to completion. Note: Jobs may not expose an agent card or support HTTPRoute-based external access.'}
+                      {workloadType === 'sandbox' && 'Kubernetes-native sandbox with stable identity, persistent storage, and lifecycle management (pause/resume/expire)'}
                     </HelperTextItem>
                   </HelperText>
                 </FormHelperText>

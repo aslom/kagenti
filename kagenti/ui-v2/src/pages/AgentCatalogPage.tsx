@@ -121,11 +121,13 @@ export const AgentCatalogPage: React.FC = () => {
   const renderWorkloadType = (workloadType: string | undefined) => {
     const type = workloadType || 'deployment';
     const label = type.charAt(0).toUpperCase() + type.slice(1);
-    let color: 'grey' | 'orange' | 'gold' = 'grey';
+    let color: 'grey' | 'orange' | 'gold' | 'purple' = 'grey';
     if (type === 'job') {
       color = 'orange';
     } else if (type === 'statefulset') {
       color = 'gold';
+    } else if (type === 'sandbox') {
+      color = 'purple';
     }
     return <Label color={color} isCompact>{label}</Label>;
   };

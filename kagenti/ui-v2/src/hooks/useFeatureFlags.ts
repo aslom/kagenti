@@ -2,7 +2,6 @@
 // Licensed under the Apache License, Version 2.0
 
 import { useState, useEffect } from 'react';
-import { useAuth } from '@/contexts';
 
 export interface FeatureFlags {
   /** Sandboxed agent runtime UI and APIs (legacy runtime sandbox). */
@@ -25,16 +24,12 @@ const DEFAULT_FLAGS: FeatureFlags = {
 let cachedFlags: FeatureFlags | null = null;
 
 export function useFeatureFlags(): FeatureFlags {
-  const { isAuthenticated, token } = useAuth();
   const [flags, setFlags] = useState<FeatureFlags>(cachedFlags ?? DEFAULT_FLAGS);
 
   useEffect(() => {
-    if (cachedFlags || !isAuthenticated || !token) return;
+    if (cachedFlags) return;
     const controller = new AbortController();
-    fetch('/api/v1/config/features', {
-      signal: controller.signal,
-      headers: { Authorization: `Bearer ${token}` },
-    })
+    fetch('/api/v1/config/features', { signal: controller.signal })
       .then(res => res.ok ? res.json() : DEFAULT_FLAGS)
       .then((data) => {
         const validated: FeatureFlags = {
@@ -49,7 +44,7 @@ export function useFeatureFlags(): FeatureFlags {
       })
       .catch((e) => { if (e?.name !== 'AbortError') console.debug('Feature flags fetch failed:', e); });
     return () => controller.abort();
-  }, [isAuthenticated, token]);
+  }, []);
 
   return flags;
 }

@@ -424,7 +424,7 @@ export const AgentDetailPage: React.FC = () => {
                       <DescriptionListGroup>
                         <DescriptionListTerm>Workload Type</DescriptionListTerm>
                         <DescriptionListDescription>
-                          <Label color={workloadType === 'job' ? 'orange' : workloadType === 'statefulset' ? 'gold' : 'grey'} isCompact>
+                          <Label color={workloadType === 'sandbox' ? 'purple' : workloadType === 'job' ? 'orange' : workloadType === 'statefulset' ? 'gold' : 'grey'} isCompact>
                             {workloadType.charAt(0).toUpperCase() + workloadType.slice(1)}
                           </Label>
                         </DescriptionListDescription>
@@ -989,8 +989,8 @@ export const AgentDetailPage: React.FC = () => {
                 >
                   {yaml.dump(
                     {
-                      apiVersion: agent.workloadType === 'statefulset' ? 'apps/v1' : agent.workloadType === 'job' ? 'batch/v1' : 'apps/v1',
-                      kind: agent.workloadType === 'statefulset' ? 'StatefulSet' : agent.workloadType === 'job' ? 'Job' : 'Deployment',
+                      apiVersion: agent.workloadType === 'sandbox' ? 'agents.x-k8s.io/v1alpha1' : agent.workloadType === 'statefulset' ? 'apps/v1' : agent.workloadType === 'job' ? 'batch/v1' : 'apps/v1',
+                      kind: agent.workloadType === 'sandbox' ? 'Sandbox' : agent.workloadType === 'statefulset' ? 'StatefulSet' : agent.workloadType === 'job' ? 'Job' : 'Deployment',
                       metadata: {
                         ...agent.metadata,
                         managedFields: undefined,
