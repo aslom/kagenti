@@ -385,7 +385,9 @@ jobs:
           # DL3013: Pin versions in pip (pip install without --no-cache-dir)
           # DL3018: Pin versions in apk add (examples use unpinned for simplicity)
           # DL3059: Multiple consecutive RUN instructions (sometimes intentional for clarity)
-          ignore: DL3008,DL3013,DL3018,DL3059
+          # DL3002: Last USER root — OpenShell supervisor must start as root for namespaces
+          # DL3007: :latest tags — upstream OpenShell images have no versioned tags yet
+          ignore: DL3002,DL3007,DL3008,DL3013,DL3018,DL3059
 
   trivy-fs:
     name: Trivy Filesystem Scan

@@ -69,5 +69,20 @@ AVD-KSV-0013
 # AVD-KSV-0001: allowPrivilegeEscalation — supervisor agent containers
 AVD-KSV-0001
 
+# AVD-KSV-0012: runAsNonRoot — supervised agents must start as root for
+# namespace creation, then drop to sandbox user. Non-supervised agents set this.
+AVD-KSV-0012
+
 # AVD-KSV-0017: privileged mode — supervisor needs root for namespace setup
 AVD-KSV-0017
+
+# AVD-KSV-0104: seccomp profile — supervised agents use privileged mode which
+# is incompatible with seccomp (Landlock provides equivalent sandboxing).
+# Non-supervised agents and gateway have seccomp RuntimeDefault set.
+AVD-KSV-0104
+
+# AVD-KSV-0118: default security context — supervised agents run privileged,
+# non-supervised agents have full security context set. This catches the
+# supervised agents where securityContext.privileged=true is set but not the
+# full pod-level context Trivy expects.
+AVD-KSV-0118

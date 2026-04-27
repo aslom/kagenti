@@ -116,6 +116,10 @@ spec:
         kagenti.io/framework: NemoClaw
         app.kubernetes.io/name: nemoclaw-hermes
     spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
       - name: agent
         # TODO(nemoclaw-images): Replace with proper NemoClaw hermes image
@@ -126,6 +130,7 @@ spec:
         command: ["/bin/sh", "/etc/nemoclaw/start.sh"]
         securityContext:
           allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
           capabilities:
             drop: [ALL]
         env:
