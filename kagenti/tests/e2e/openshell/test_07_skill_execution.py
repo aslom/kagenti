@@ -152,6 +152,28 @@ class TestPRReviewSkill:
         text = extract_a2a_text(resp)
         assert text and len(text) > 30
 
+    @skip_no_llm
+    async def test_pr_review__adk_agent_supervised__skill_under_supervisor(
+        self, adk_agent_supervised_url
+    ):
+        """Tier 2: ADK agent executes PR review under supervisor security."""
+        skill = _read_skill("github:pr-review")
+        prompt = (
+            f"Follow these review instructions:\n{skill[:800]}\n\n"
+            f"Review this diff:\n```diff\n{CANONICAL_DIFF}\n```"
+        )
+        async with httpx.AsyncClient() as client:
+            resp = await a2a_send(
+                client,
+                adk_agent_supervised_url,
+                prompt,
+                request_id="skill-pr-review-adk-supervised",
+                timeout=120.0,
+            )
+        assert "result" in resp
+        text = extract_a2a_text(resp)
+        assert text and len(text) > 30
+
     async def test_pr_review__weather_agent__no_llm(self):
         """Weather agent cannot execute skills — no LLM."""
         pytest.skip(
@@ -262,6 +284,28 @@ class TestRCASkill:
         text = extract_a2a_text(resp)
         assert text and len(text) > 30
 
+    @skip_no_llm
+    async def test_rca__adk_agent_supervised__skill_under_supervisor(
+        self, adk_agent_supervised_url
+    ):
+        """Tier 2: ADK agent executes RCA under supervisor security."""
+        skill = _read_skill("rca:ci")
+        prompt = (
+            f"Follow these RCA instructions:\n{skill[:800]}\n\n"
+            f"Analyze these CI logs:\n```\n{CANONICAL_CI_LOG}\n```"
+        )
+        async with httpx.AsyncClient() as client:
+            resp = await a2a_send(
+                client,
+                adk_agent_supervised_url,
+                prompt,
+                request_id="skill-rca-adk-supervised",
+                timeout=120.0,
+            )
+        assert "result" in resp
+        text = extract_a2a_text(resp)
+        assert text and len(text) > 30
+
     async def test_rca__weather_agent__no_llm(self):
         """Weather agent cannot execute RCA skill — no LLM."""
         pytest.skip("weather_agent: No LLM — cannot execute RCA skill.")
@@ -349,6 +393,28 @@ class TestSecurityReviewSkill:
                 adk_agent_url,
                 prompt,
                 request_id="skill-security-adk",
+                timeout=120.0,
+            )
+        assert "result" in resp
+        text = extract_a2a_text(resp)
+        assert text and len(text) > 30
+
+    @skip_no_llm
+    async def test_security_review__adk_agent_supervised__skill_under_supervisor(
+        self, adk_agent_supervised_url
+    ):
+        """Tier 2: ADK agent executes security review under supervisor."""
+        skill = _read_skill("test:review")
+        prompt = (
+            f"Follow these security review instructions:\n{skill[:800]}\n\n"
+            f"Review this code:\n```python\n{CANONICAL_CODE}\n```"
+        )
+        async with httpx.AsyncClient() as client:
+            resp = await a2a_send(
+                client,
+                adk_agent_supervised_url,
+                prompt,
+                request_id="skill-security-adk-supervised",
                 timeout=120.0,
             )
         assert "result" in resp

@@ -144,6 +144,21 @@ def adk_agent_url(agent_namespace, agent_port):
 
 
 @pytest.fixture(scope="session")
+def adk_agent_supervised_url(agent_namespace, agent_port):
+    """Port-forward to supervised ADK agent via port-bridge sidecar."""
+    url, proc = _port_forward("adk-agent-supervised", agent_namespace, agent_port)
+    if not url:
+        pytest.skip(
+            "Cannot reach supervised ADK agent — "
+            "port-bridge sidecar may not be deployed"
+        )
+    yield url
+    if proc:
+        proc.terminate()
+        proc.wait()
+
+
+@pytest.fixture(scope="session")
 def claude_sdk_agent_url(agent_namespace, agent_port):
     """Port-forward to Claude SDK agent (may fail if supervisor netns blocks it)."""
     url, proc = _port_forward("claude-sdk-agent", agent_namespace, agent_port)
