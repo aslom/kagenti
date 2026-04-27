@@ -76,6 +76,11 @@ AVD-KSV-0012
 # AVD-KSV-0017: privileged mode — supervisor needs root for namespace setup
 AVD-KSV-0017
 
+# AVD-KSV-0014: readOnlyRootFilesystem — supervised agent containers need
+# writable root for namespace/cgroup setup during sandbox initialization.
+# Non-supervised agents and gateway have readOnlyRootFilesystem: true.
+AVD-KSV-0014
+
 # AVD-KSV-0104: seccomp profile — supervised agents use privileged mode which
 # is incompatible with seccomp (Landlock provides equivalent sandboxing).
 # Non-supervised agents and gateway have seccomp RuntimeDefault set.
