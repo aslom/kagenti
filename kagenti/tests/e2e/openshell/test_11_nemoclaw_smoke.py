@@ -25,7 +25,7 @@ import pytest
 
 import httpx
 
-from conftest import (
+from kagenti.tests.e2e.openshell.conftest import (
     NEMOCLAW_AGENTS,
     NEMOCLAW_AGENT_CONFIG,
     nemoclaw_enabled,
@@ -52,7 +52,7 @@ class TestNemoClawPlatformHealth:
     @pytest.mark.parametrize("agent_name", NEMOCLAW_AGENTS)
     def test_deployment_exists(self, agent_name, agent_namespace):
         """NemoClaw agent deployment exists and has available replicas."""
-        from conftest import kubectl_get_deployments_json
+        from kagenti.tests.e2e.openshell.conftest import kubectl_get_deployments_json
 
         deployments = kubectl_get_deployments_json(agent_namespace)
         matching = [d for d in deployments if d["metadata"]["name"] == agent_name]
@@ -68,7 +68,7 @@ class TestNemoClawPlatformHealth:
     @pytest.mark.parametrize("agent_name", NEMOCLAW_AGENTS)
     def test_pod_running(self, agent_name, agent_namespace):
         """NemoClaw agent pod is in Running phase."""
-        from conftest import kubectl_get_pods_json
+        from kagenti.tests.e2e.openshell.conftest import kubectl_get_pods_json
 
         pods = kubectl_get_pods_json(agent_namespace)
         matching = [
@@ -84,7 +84,7 @@ class TestNemoClawPlatformHealth:
     @pytest.mark.parametrize("agent_name", NEMOCLAW_AGENTS)
     def test_framework_label(self, agent_name, agent_namespace):
         """NemoClaw agents have the NemoClaw framework label."""
-        from conftest import kubectl_get_pods_json
+        from kagenti.tests.e2e.openshell.conftest import kubectl_get_pods_json
 
         pods = kubectl_get_pods_json(agent_namespace)
         matching = [p for p in pods if agent_name in p["metadata"].get("name", "")]
@@ -192,7 +192,7 @@ class TestNemoClawSecurity:
     @pytest.mark.parametrize("agent_name", NEMOCLAW_AGENTS)
     def test_authbridge_disabled(self, agent_name, agent_namespace):
         """NemoClaw agents have AuthBridge injection disabled."""
-        from conftest import kubectl_get_pods_json
+        from kagenti.tests.e2e.openshell.conftest import kubectl_get_pods_json
 
         pods = kubectl_get_pods_json(agent_namespace)
         matching = [p for p in pods if agent_name in p["metadata"].get("name", "")]
@@ -203,7 +203,7 @@ class TestNemoClawSecurity:
     @pytest.mark.parametrize("agent_name", NEMOCLAW_AGENTS)
     def test_no_privilege_escalation(self, agent_name, agent_namespace):
         """NemoClaw agent containers cannot escalate privileges."""
-        from conftest import kubectl_get_pods_json
+        from kagenti.tests.e2e.openshell.conftest import kubectl_get_pods_json
 
         pods = kubectl_get_pods_json(agent_namespace)
         matching = [p for p in pods if agent_name in p["metadata"].get("name", "")]
@@ -218,7 +218,7 @@ class TestNemoClawSecurity:
     @pytest.mark.parametrize("agent_name", NEMOCLAW_AGENTS)
     def test_capabilities_dropped(self, agent_name, agent_namespace):
         """NemoClaw agents drop all Linux capabilities."""
-        from conftest import kubectl_get_pods_json
+        from kagenti.tests.e2e.openshell.conftest import kubectl_get_pods_json
 
         pods = kubectl_get_pods_json(agent_namespace)
         matching = [p for p in pods if agent_name in p["metadata"].get("name", "")]
@@ -234,7 +234,7 @@ class TestNemoClawSecurity:
     @pytest.mark.parametrize("agent_name", NEMOCLAW_AGENTS)
     def test_llm_key_from_secret(self, agent_name, agent_namespace):
         """NemoClaw agents read LLM keys from Kubernetes secrets, not env literals."""
-        from conftest import kubectl_get_pods_json
+        from kagenti.tests.e2e.openshell.conftest import kubectl_get_pods_json
 
         pods = kubectl_get_pods_json(agent_namespace)
         matching = [p for p in pods if agent_name in p["metadata"].get("name", "")]
