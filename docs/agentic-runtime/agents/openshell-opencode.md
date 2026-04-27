@@ -149,30 +149,47 @@ OpenCode uses OpenAI-compatible APIs and can route through LiteLLM. The
 creates a Sandbox CR, injects `OPENAI_API_KEY` from the `litellm-virtual-keys`
 secret, and runs `opencode run` via `kubectl exec`.
 
-### Supported Skills (Blocked — `/v1/responses` API)
+### Supported Skills
 
-| Skill | Test | Status | Blocker |
-|-------|------|--------|---------|
-| PR Review | `test_pr_review__openshell_opencode` | **SKIP** | OpenCode calls `/v1/responses` API, not `/v1/chat/completions`. LiteLLM doesn't proxy this endpoint. |
-| RCA | `test_rca__openshell_opencode` | **SKIP** | Same `/v1/responses` blocker |
-| Security Review | `test_security_review__openshell_opencode` | **SKIP** | Same blocker |
-| Real GitHub PR | `test_review_real_github_pr__opencode` | **SKIP** | Same blocker |
+| Skill | Test | Status | Notes |
+|-------|------|--------|-------|
+| PR Review | `test_pr_review__openshell_opencode` | **PASS** | Via `@ai-sdk/openai-compatible` + LiteLLM |
+| RCA | `test_rca__openshell_opencode` | **PASS** | Same provider config |
+| Security Review | `test_security_review__openshell_opencode` | **PASS** | Same provider config |
+| Real GitHub PR | `test_review_real_github_pr__opencode` | ⏭️ timeout | Sandbox creation + large diff exceeds timeout |
 
-### `/v1/responses` API — LiteLLM Version Requirement
+### `/v1/responses` API — Solved via `@ai-sdk/openai-compatible`
 
-OpenCode internally uses the [OpenAI Responses API](https://platform.openai.com/docs/api-reference/responses)
-(`POST /v1/responses`) for both session title generation and main inference.
+OpenCode's built-in OpenAI provider calls `/v1/responses` (Responses API),
+which non-OpenAI backends (LiteMaaS, Ollama) don't support. The fix is to
+use the `@ai-sdk/openai-compatible` provider, which calls
+`/v1/chat/completions` instead.
 
-LiteLLM **does** support `/v1/responses` since v1.60+
-([docs](https://docs.litellm.ai/docs/response_api)), but our original
-deployment (v1.63.14) had a bug in the handler (500 error). Upgrading to
-**v1.83.10+** fixes this.
+The test helper (`conftest.py:run_opencode_in_sandbox`) writes an OpenCode
+config into the sandbox before running:
+
+```json
+{
+  "provider": {
+    "litellm": {
+      "npm": "@ai-sdk/openai-compatible",
+      "options": { "baseURL": "http://litellm-model-proxy.team1.svc:4000/v1" },
+      "models": { "gpt-4o-mini": {} }
+    }
+  }
+}
+```
+
+Then runs: `opencode run -m litellm/gpt-4o-mini "<prompt>"`
 
 **Requirements for OpenCode to work:**
-1. LiteLLM v1.83.10+ (fixes `/v1/responses` handler bug)
-2. Memory limit ≥ 1Gi (newer LiteLLM requires more memory)
-3. Model aliases including `gpt-5-nano` (OpenCode uses internally for titles)
-4. Stable Istio mesh enrollment (pod-to-pod mTLS after fresh deploy)
+1. LiteLLM v1.83.10+ deployed with model aliases
+2. `litellm-virtual-keys` Secret with `api-key` in the sandbox namespace
+3. `@ai-sdk/openai-compatible` config written to `$HOME/.config/opencode/config.json`
+4. Model name uses `litellm/` prefix (routes through the compatible provider)
+
+Sources: [OpenCode providers docs](https://opencode.ai/docs/providers),
+[LiteLLM /responses docs](https://docs.litellm.ai/docs/response_api)
 
 ### How to Test Manually (When Blocker Is Resolved)
 
@@ -231,8 +248,8 @@ opencode run -m openai/gpt-4o-mini "Review this code for security issues: ..."
 | Test File | Tests | Pass | Skip | Notes |
 |-----------|-------|------|------|-------|
 | test_04_sandbox_lifecycle | 1 | 1 | 0 | Sandbox CR created |
-| test_07_skill_execution | 4 | 0 | 4 | `/v1/responses` API blocker |
-| test_10_workspace_persistence | 2 | 1 | 1 | PVC write passes; sandbox creation skips |
+| test_07_skill_execution | 5 | 3 | 2 | PR review, RCA, security pass; real GH PR + CLI check skip |
+| test_10_workspace_persistence | 3 | 3 | 0 | PVC write + sandbox creation pass |
 
 ## 11. Sandbox Deployment Models
 

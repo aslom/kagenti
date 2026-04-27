@@ -478,29 +478,36 @@ because they kill session-scoped port-forward fixtures.
 
 ### Q8.1: Can custom A2A agents use OpenShell credential management today?
 
-**Status:** BLOCKED (needs port bridge sidecar) | **Related:** Q1.1 (Tier 2), Q2.3 (credential model)
+**Status:** ANSWERED (2026-04-27) — **port-bridge sidecar implemented**
 
-Custom A2A agents (ADK, Claude SDK) need to be accessible via K8s Service
-on port 8080. The supervisor's netns blocks this. Two solutions:
+Custom A2A agents need to be accessible via K8s Service on port 8080.
+The supervisor's netns blocks this. Solved with a port-bridge sidecar:
 
-1. **Port bridge sidecar (Kagenti contribution):** socat container bridges
-   pod network → netns. Can implement now without upstream changes.
-2. **Upstream `--expose-port` flag:** Supervisor natively reverse-proxies
-   inbound traffic. Cleaner but needs upstream PR.
+```yaml
+- name: port-bridge
+  image: python:3.12-slim
+  command: ["python3", "-c"]
+  args: ["<TCP forwarder: 0.0.0.0:8080 → 10.200.0.2:8080>"]
+```
 
-**Impact:** Would enable unified credential management for ALL agents.
+**Validated:** `adk-agent-supervised` runs LLM skill tests (PR review,
+RCA, security review) through the port-bridge on both Kind and HyperShift.
+All 3 skill tests pass under full supervisor security (Landlock + seccomp +
+netns + OPA).
+
+**Related:** Q1.1 (Tier 2), Q2.3 (credential model)
 
 ### Q8.2: Can builtin sandbox agents use LiteMaaS without model validation issues?
 
-**Status:** BLOCKED (needs upstream model-agnostic inference routing)
+**Status:** PARTIALLY ANSWERED (2026-04-27)
 
-Both Claude Code and OpenCode validate model names against hardcoded lists.
-`llama-scout-17b` is not in either list. The OpenShell inference router
-could do model ID rewriting (`gpt-4` → `llama-scout-17b`) but this is
-not yet configurable.
+| Agent | Model Validation | LiteMaaS Status | Fix |
+|-------|-----------------|-----------------|-----|
+| **OpenCode** | Uses `@ai-sdk/openai` (calls `/v1/responses`) | **WORKING** | `@ai-sdk/openai-compatible` provider config (calls `/v1/chat/completions`) |
+| **Claude Code** | Validates against Anthropic model catalog | **BLOCKED** | Needs real Anthropic key or LiteLLM routing to real Anthropic model |
 
-**Workaround:** Use the Budget Proxy or LiteLLM with model aliases.
-**Upstream fix:** Configurable model ID mapping in the inference router.
+OpenCode is solved. Claude Code remains blocked because it requires the
+Anthropic messages API format and validates `claude-*` model names.
 
 ### Q8.3: Does the OpenShell RFC 0001 rearchitecture address these blockers?
 
@@ -540,27 +547,27 @@ via gateway's `CreateSandbox` gRPC would give us credential injection for free.
 
 ### Q8.5: How to enable OpenCode skill execution in builtin sandboxes?
 
-**Status:** INVESTIGATING — path identified, needs LiteLLM deployment
+**Status:** ANSWERED (2026-04-27) — **working, 3 tests pass**
 
-OpenCode validates model names against a hardcoded client-side list.
-`llama-scout-17b` is not in the list. The solution:
+OpenCode's built-in `@ai-sdk/openai` provider calls `/v1/responses`, which
+LiteMaaS doesn't support. The fix uses `@ai-sdk/openai-compatible` provider
+which calls `/v1/chat/completions` instead.
 
-1. Deploy LiteLLM in the cluster with model aliases
-   (`gpt-4o-mini` → `llama-scout-17b` on LiteMaaS)
+**Solution implemented:**
+1. Deploy LiteLLM v1.83.10 with model aliases + `use_chat_completions_api: true`
 2. Sandbox gets virtual key from `litellm-virtual-keys` (secretKeyRef)
-3. Sandbox `OPENAI_BASE_URL` points to `http://litellm.team1.svc:4000/v1`
-4. OpenCode uses `openai/gpt-4o-mini` (in its known model list)
-5. LiteLLM maps to LiteMaaS backend with real API key
-6. Agent never sees the real LiteMaaS key — zero-secret for agent
+3. Test helper writes `$HOME/.config/opencode/config.json` with:
+   ```json
+   {"provider":{"litellm":{"npm":"@ai-sdk/openai-compatible",
+     "options":{"baseURL":"http://litellm-model-proxy.team1.svc:4000/v1"},
+     "models":{"gpt-4o-mini":{}}}}}
+   ```
+4. Runs: `opencode run -m litellm/gpt-4o-mini "<prompt>"`
 
-**What's needed:**
-- Add LiteLLM to the openshell fulltest deployment (ConfigMap + Deployment + Service)
-- Configure model aliases in LiteLLM config
-- Handle Istio ambient mTLS (LiteLLM pod needs mesh labels)
-- Update sandbox creation to include `OPENAI_API_KEY` + `OPENAI_BASE_URL`
+**Results:** PR review, RCA, security review all PASS on Kind.
 
-**Verified:** LiteLLM proxy with model aliases works (tested via port-forward).
-Blocked by Istio ambient mTLS — LiteLLM needs proper mesh integration.
+Sources: [OpenCode providers docs](https://opencode.ai/docs/providers),
+[LiteLLM /responses docs](https://docs.litellm.ai/docs/response_api)
 
 **Related:** Q3.1 (inference routing), Q2.3 (credential model), Q1.1 (Tier 1)
 

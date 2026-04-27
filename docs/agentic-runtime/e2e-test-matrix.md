@@ -7,29 +7,34 @@
 Every test category covers ALL agent types. Unsupported combinations are
 explicitly skipped with documented reasons and TODOs.
 
-| Agent ID | Type | Protocol | LLM | Supervisor | Skill Support |
-|----------|------|----------|-----|------------|---------------|
-| `weather_agent` | Custom A2A | A2A JSON-RPC | No | No | N/A (no LLM) |
-| `adk_agent` | Custom A2A | A2A JSON-RPC | LiteMaaS | No | Via LLM tool calling |
-| `claude_sdk_agent` | Custom A2A | A2A JSON-RPC | LiteMaaS | No | Via LLM prompt injection |
-| `weather_supervised` | Custom A2A | kubectl exec | No | Yes | N/A (no LLM) |
-| `openshell_claude` | Builtin sandbox | kubectl exec | Anthropic | Yes | Native `.claude/skills/` |
-| `openshell_opencode` | Builtin sandbox | kubectl exec | OpenAI-compat | Yes | Via tool/prompt system |
-| `openshell_generic` | Builtin sandbox | kubectl exec | N/A | Yes | No agent |
+| Agent ID | Type | Tier | Protocol | LLM | Supervisor | Skill Support |
+|----------|------|------|----------|-----|------------|---------------|
+| `weather_agent` | Custom A2A | 3 | A2A JSON-RPC | No | No | N/A (no LLM) |
+| `adk_agent` | Custom A2A | 3 | A2A JSON-RPC | LiteMaaS | No | Via LLM tool calling |
+| `claude_sdk_agent` | Custom A2A | 3 | A2A JSON-RPC | LiteMaaS | No | Via LLM prompt injection |
+| `adk_agent_supervised` | Custom A2A | **2** | A2A via port-bridge | LiteMaaS | **Yes** | LLM + supervisor security |
+| `weather_supervised` | Custom A2A | 2 | kubectl exec | No | Yes | N/A (no LLM) |
+| `openshell_claude` | Builtin sandbox | 1 | kubectl exec | Anthropic | Yes | Native `.claude/skills/` |
+| `openshell_opencode` | Builtin sandbox | 1 | kubectl exec | OpenAI-compat | Yes | Via `@ai-sdk/openai-compatible` |
+| `openshell_generic` | Builtin sandbox | 1 | kubectl exec | N/A | Yes | No agent |
 
 ## Phase 1 PoC Test Results
 
 | Platform | Total | Passed | Failed | Skipped | Notes |
 |----------|-------|--------|--------|---------|-------|
-| Kind | 117 | 78-82 | 0-5 | 34 | Failures are rollout timing; 0 on clean runs |
-| HyperShift | 117 | 75-76 | 0-4 | 38 | Same rollout timing issue |
+| Kind | 120 | 92 | 0 | 28 | Fresh cluster, zero failures |
+| HyperShift | 120 | 83 | 1 | 36 | 1 failure is stale build pod (not our code) |
 
 Infrastructure:
-- LiteLLM model proxy with aliases (gpt-4o-mini → llama-scout-17b)
+- LiteLLM v1.83.10 model proxy with aliases (gpt-4o-mini → llama-scout-17b)
+- `use_chat_completions_api: true` (translates `/v1/responses` → `/v1/chat/completions`)
+- OpenCode sandbox uses `@ai-sdk/openai-compatible` provider (avoids `/v1/responses`)
 - HITL OPA egress blocking tests (python3 urllib, not curl)
 - PVC workspace persistence tests
 - Sandbox creation for Claude + OpenCode
 - TCP readiness probes (Istio ambient mTLS compatible)
+- Port-bridge socat sidecar for supervised agents (bridges netns)
+- `kagenti.io/inject: disabled` on all agents (AuthBridge Phase 3)
 
 ## Result Legend
 
@@ -38,22 +43,22 @@ Infrastructure:
 - **SKIP** (⏭️) — test skips with documented reason
 - **—** — test not applicable for this agent type
 
-## Skill Execution Matrix (Kind, fresh cluster)
+## Skill Execution Matrix (Kind + HyperShift)
 
-| Skill | adk | claude_sdk | weather | supervised | os_claude | os_opencode | os_generic |
-|-------|-----|-----------|---------|-----------|----------|------------|-----------|
-| PR review | ✅ | ✅ | ⏭️ no LLM | ⏭️ no LLM | ⏭️ Anthropic key | ⏭️ /v1/responses API | ⏭️ no agent |
-| RCA | ✅ | ✅ | ⏭️ no LLM | ⏭️ no LLM | ⏭️ Anthropic key | ⏭️ /v1/responses API | ⏭️ no agent |
-| Security review | ✅ | ✅ | ⏭️ no LLM | ⏭️ no LLM | ⏭️ Anthropic key | ⏭️ /v1/responses API | ⏭️ no agent |
-| Code generation | — | ✅ | — | — | — | — | — |
-| Real GitHub PR | ✅ | ✅ | — | — | ⏭️ Anthropic key | ⏭️ /v1/responses API | — |
-| RCA CI logs | — | ✅ | — | — | — | — | — |
+| Skill | adk | claude_sdk | adk_supervised | weather | supervised | os_claude | os_opencode | os_generic |
+|-------|-----|-----------|----------------|---------|-----------|----------|------------|-----------|
+| PR review | ✅ | ✅ | ✅ | ⏭️ no LLM | ⏭️ no LLM | ⏭️ Anthropic key | ✅ (Kind) | ⏭️ no agent |
+| RCA | ✅ | ✅ | ✅ | ⏭️ no LLM | ⏭️ no LLM | ⏭️ Anthropic key | ✅ (Kind) | ⏭️ no agent |
+| Security review | ✅ | ✅ | ✅ | ⏭️ no LLM | ⏭️ no LLM | ⏭️ Anthropic key | ✅ (Kind) | ⏭️ no agent |
+| Code generation | — | ✅ | — | — | — | — | — | — |
+| Real GitHub PR | ✅ | ✅ | — | — | — | ⏭️ Anthropic key | ⏭️ timeout | — |
+| RCA CI logs | — | ✅ | — | — | — | — | — | — |
 
 **Skip reasons:**
 - `no LLM` — agent has no LLM capability (by design)
 - `no agent` — generic sandbox has no agent CLI
 - `Anthropic key` — Claude Code requires real Anthropic API key (Phase 2)
-- `/v1/responses API` — OpenCode uses OpenAI Responses API; requires LiteLLM v1.83.10+ (v1.63.14 had a handler bug)
+- `timeout` — sandbox creation + LLM call exceeds test timeout for large diffs
 
 **Skill injection method per agent:**
 - `adk` / `claude_sdk` — skill markdown read from `.claude/skills/<name>/SKILL.md` and embedded in A2A `message/send` prompt
