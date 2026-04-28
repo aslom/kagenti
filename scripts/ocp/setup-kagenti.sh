@@ -949,7 +949,7 @@ log_success "Kagenti installed"
 
 # Grant otel-collector SA MLflow RBAC in agent namespaces (created by kagenti chart above)
 if [ "$SKIP_MLFLOW" = true ]; then
-  log_step "Skipping MLflow RBAC grant (--skip-mlflow)"
+  log_success "Skipping MLflow RBAC grant (--skip-mlflow)"
 else
   _mlflow_grant_otel_rbac
 fi
