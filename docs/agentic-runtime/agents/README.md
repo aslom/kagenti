@@ -15,18 +15,24 @@ capabilities, Kagenti integration points, and testing status.
 
 ## Current Agents
 
-### Deployed in PoC (tested)
+### Deployed and Tested
 
 | Agent Doc | Type | Framework | LLM | Supervisor | Status |
 |-----------|------|-----------|-----|------------|--------|
-| [weather-agent.md](weather-agent.md) | Custom A2A | LangGraph | No | No | Deployed, tested |
-| [adk-agent.md](adk-agent.md) | Custom A2A | Google ADK | LiteMaaS | No | Deployed, tested |
-| [claude-sdk-agent.md](claude-sdk-agent.md) | Custom A2A | Anthropic SDK | LiteMaaS | No | Deployed, tested |
-| [weather-supervised.md](weather-supervised.md) | Custom A2A | LangGraph | No | Yes | Deployed, tested |
-| [openshell-claude.md](openshell-claude.md) | Builtin | Claude Code CLI | Anthropic | Yes | Sandbox CR tested |
-| [openshell-opencode.md](openshell-opencode.md) | Builtin | OpenCode CLI | OpenAI-compat | Yes | Sandbox CR tested |
+| [claude-sdk-agent.md](claude-sdk-agent.md) | Custom A2A | Anthropic SDK | LiteMaaS | No | All skills pass |
+| [adk-agent.md](adk-agent.md) | Custom A2A | Google ADK | LiteMaaS | Yes (supervised) | All skills pass |
+| [weather-supervised.md](weather-supervised.md) | Custom A2A | LangGraph | No | Yes (supervised) | Infra tests pass |
+| [openshell-claude.md](openshell-claude.md) | Builtin | Claude Code CLI | Anthropic/LiteLLM | Yes | Sandbox CR tested |
+| [openshell-opencode.md](openshell-opencode.md) | Builtin | OpenCode CLI | OpenAI-compat | Yes | All LiteMaaS skills pass |
 
-### Future agents (planned — docs not yet written)
+### NemoClaw Agents (integrated from [NVIDIA/NemoClaw](https://github.com/NVIDIA/NemoClaw))
+
+| Agent | Type | Framework | LLM | Status |
+|-------|------|-----------|-----|--------|
+| nemoclaw-hermes | NemoClaw | Nous Research Hermes (v2026.4.13) | LiteMaaS | Platform + security tests pass |
+| nemoclaw-openclaw | NemoClaw | OpenClaw (v2026.4.9) | LiteMaaS | All tests pass |
+
+### Future agents (planned)
 
 | Agent | Type | Framework | Notes |
 |-------|------|-----------|-------|

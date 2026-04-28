@@ -9,16 +9,18 @@ explicitly skipped with documented reasons and TODOs.
 
 ### Currently Deployed Agents
 
-| Agent ID | Type | Tier | Protocol | LLM | Supervisor | Skill Support |
-|----------|------|------|----------|-----|------------|---------------|
-| `weather_agent` | Custom A2A | 3 | A2A JSON-RPC | No | No | N/A (no LLM) |
-| `adk_agent` | Custom A2A | 3 | A2A JSON-RPC | LiteMaaS | No | Via LLM tool calling |
-| `claude_sdk_agent` | Custom A2A | 3 | A2A JSON-RPC | LiteMaaS | No | Via LLM prompt injection |
-| `adk_agent_supervised` | Custom A2A | **2** | A2A via port-bridge | LiteMaaS | **Yes** | LLM + supervisor security |
-| `weather_supervised` | Custom A2A | 2 | kubectl exec | No | Yes | N/A (no LLM) |
-| `openshell_claude` | Builtin sandbox | 1 | kubectl exec | Anthropic | Yes | Native `.claude/skills/` |
-| `openshell_opencode` | Builtin sandbox | 1 | kubectl exec | OpenAI-compat | Yes | Via `@ai-sdk/openai-compatible` |
-| `openshell_generic` | Builtin sandbox | 1 | kubectl exec | N/A | Yes | No agent |
+| Agent ID | Type | Tier | Protocol | LLM | Supervisor | Skill Support | Tests |
+|----------|------|------|----------|-----|------------|---------------|:---:|
+| `claude_sdk_agent` | Custom A2A | 3 | A2A JSON-RPC | LiteMaaS | No | Via LLM prompt injection | 11 pass |
+| `adk_agent_supervised` | Custom A2A | **2** | A2A via port-bridge | LiteMaaS | **Yes** | LLM + supervisor security | 3 pass |
+| `weather_supervised` | Custom A2A | 2 | kubectl exec | No | Yes | N/A (no LLM) | 3 pass |
+| `openshell_opencode` | Builtin sandbox | 1 | kubectl exec | OpenAI-compat | Yes | Via `@ai-sdk/openai-compatible` | 6 pass |
+| `openshell_claude` | Builtin sandbox | 1 | kubectl exec | Anthropic/LiteLLM | Yes | Native `.claude/skills/` | 2 pass, 5 skip |
+| `openshell_generic` | Builtin sandbox | 1 | kubectl exec | N/A | Yes | No agent | 2 pass |
+| `nemoclaw_hermes` | NemoClaw | 3 | TCP (internal) | LiteMaaS | No | N/A | 8 pass, 1 skip |
+| `nemoclaw_openclaw` | NemoClaw | 3 | HTTP gateway | LiteMaaS | No | N/A | 9 pass |
+
+> **Latest results:** 102 passed, 0 failed, 34 skipped (local Kind with LiteMaaS + NemoClaw)
 
 ### Sandbox Compatibility Matrix (Builtin + NemoClaw Agents)
 

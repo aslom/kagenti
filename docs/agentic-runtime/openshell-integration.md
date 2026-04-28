@@ -1,7 +1,8 @@
 # OpenShell Integration with Kagenti
 
-> **Status:** PoC (experimental)
+> **Status:** PoC validated ([PR #1300](https://github.com/kagenti/kagenti/pull/1300)) — MVP in progress ([epic #1363](https://github.com/kagenti/kagenti/issues/1363))
 > **Source:** [NVIDIA/OpenShell](https://github.com/NVIDIA/OpenShell) (Apache 2.0)
+> **Design doc:** [openshell-mvp.md](https://github.com/kagenti/kagenti/pull/1364) (gateway-per-tenant architecture)
 
 ---
 
@@ -68,6 +69,49 @@ graph TB
 | LiteLLM | `kagenti-system` | LLM model routing |
 | Budget Proxy | `team1` | LLM token budget enforcement |
 | PostgreSQL | `team1` | Sessions + budget databases |
+
+## 2b. MVP Target Architecture
+
+> **Epic:** [#1363](https://github.com/kagenti/kagenti/issues/1363) — Gateway-per-Tenant on Kind + OpenShift
+> **Design doc:** [PR #1364](https://github.com/kagenti/kagenti/pull/1364)
+
+The MVP replaces the single shared gateway with **gateway-per-tenant** isolation,
+adds OIDC authentication via Keycloak, cert-manager TLS, session persistence (dtach),
+and headless agent execution (AgentTask CRD).
+
+```
+Cluster
+├── keycloak/                      Shared OIDC provider (realm: openshell)
+├── agent-sandbox-system/          Shared CRD controller
+├── team1/                         Tenant 1: gateway + driver + sandboxes
+│   ├── gateway (StatefulSet)      Forked openshell-server + OIDC (PR #935)
+│   ├── compute-driver (sidecar)   Forked openshell-driver-openshift (Go)
+│   ├── credentials-driver         openshell-credentials-keycloak (Go, new)
+│   ├── Service + Ingress          TCPRoute (Kind) or Route (OpenShift)
+│   └── sandbox pods               Created by agent-sandbox-controller
+└── team2/                         Tenant 2: same structure, fully isolated
+```
+
+### PoC → MVP Transition
+
+| PoC (PR #1300) | MVP (#1363) | Issue |
+|---|---|---|
+| Single gateway in `openshell-system` | Gateway-per-tenant | [#1358](https://github.com/kagenti/kagenti/issues/1358) |
+| `--disable-tls --disable-gateway-auth` | cert-manager TLS + Keycloak OIDC | [#1357](https://github.com/kagenti/kagenti/issues/1357) |
+| Kustomize manifests | `charts/openshell/` Helm chart | [#1358](https://github.com/kagenti/kagenti/issues/1358) |
+| Monolithic fulltest script | Layered scripts (build, deploy-shared, deploy-tenant) | [#1361](https://github.com/kagenti/kagenti/issues/1361) |
+| In-process K8s compute driver | Out-of-process Go driver (forked) | [#1354](https://github.com/kagenti/kagenti/issues/1354) |
+| No credential driver | Keycloak credentials driver | [#1355](https://github.com/kagenti/kagenti/issues/1355) |
+| No session persistence | dtach via init container | [#1354](https://github.com/kagenti/kagenti/issues/1354) |
+| No headless mode | AgentTask CRD + controller | Design doc §7 |
+
+### Forked Repos
+
+| Upstream | Fork | Changes |
+|---|---|---|
+| [NVIDIA/OpenShell](https://github.com/NVIDIA/OpenShell) | [kagenti/openshell](https://github.com/kagenti/openshell) | `--compute-driver-socket` + `--credentials-driver-socket` flags, OIDC (PR #935) |
+| [openshell-driver-openshift](https://github.com/zanetworker/openshell-driver-openshift) | [kagenti/openshell-driver-openshift](https://github.com/kagenti/openshell-driver-openshift) | Namespace flag, tenant labels, scoped RBAC, dtach |
+| New | [kagenti/openshell-credentials-keycloak](https://github.com/kagenti/openshell-credentials-keycloak) | OAuth2 client_credentials via Keycloak (~500 lines Go) |
 
 ## 3. Agent Deployment Tiers
 
