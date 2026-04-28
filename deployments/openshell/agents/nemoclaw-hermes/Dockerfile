@@ -5,7 +5,7 @@
 #
 # Based on: github.com/NVIDIA/NemoClaw/agents/hermes/Dockerfile.base @ v0.0.28
 # Simplified: no NemoClaw plugin, no blueprint, no OpenShell supervisor.
-# The agent runs standalone with an OpenAI-compatible API on port 8642.
+# socat bridges from 0.0.0.0:8642 to loopback:15053 for K8s access.
 
 FROM python:3.12-slim
 
@@ -13,7 +13,7 @@ ARG HERMES_VERSION=v2026.4.13
 
 # hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl git ca-certificates \
+        curl git ca-certificates socat \
     && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd -r agent && useradd -r -g agent -d /sandbox -s /bin/bash agent \
@@ -29,10 +29,19 @@ RUN pip install --no-cache-dir \
         "pyyaml==6.0.3" \
     && hermes --version
 
+# Startup script: configure + socat bridge + hermes gateway
+RUN echo '#!/bin/sh' > /usr/local/bin/start-hermes.sh \
+    && echo 'set -e' >> /usr/local/bin/start-hermes.sh \
+    && echo 'mkdir -p "$HOME/.hermes" "$HOME/.hermes-data/memories" "$HOME/.hermes-data/logs"' >> /usr/local/bin/start-hermes.sh \
+    && echo 'echo "GATEWAY_ALLOW_ALL_USERS=true" > "$HOME/.hermes/.env"' >> /usr/local/bin/start-hermes.sh \
+    && echo 'hermes config set model "${LLM_MODEL:-gpt-4o-mini}"' >> /usr/local/bin/start-hermes.sh \
+    && echo 'socat TCP-LISTEN:8642,fork,reuseaddr,bind=0.0.0.0 TCP:127.0.0.1:15053 &' >> /usr/local/bin/start-hermes.sh \
+    && echo 'exec hermes gateway run' >> /usr/local/bin/start-hermes.sh \
+    && chmod +x /usr/local/bin/start-hermes.sh
+
 USER agent
 ENV HOME=/sandbox
 WORKDIR /sandbox
 
 EXPOSE 8642
-ENV HERMES_PORT=8642
-CMD ["hermes", "gateway", "run"]
+CMD ["/usr/local/bin/start-hermes.sh"]

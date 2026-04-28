@@ -121,8 +121,7 @@ spec:
           name: http
           protocol: TCP
         readinessProbe:
-          httpGet:
-            path: /health
+          tcpSocket:
             port: 8642
           initialDelaySeconds: 15
           periodSeconds: 10

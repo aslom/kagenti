@@ -186,8 +186,8 @@ def nemoclaw_hermes_url(agent_namespace):
 
 @pytest.fixture(scope="session")
 def nemoclaw_openclaw_url(agent_namespace):
-    """Port-forward to NemoClaw OpenClaw agent (gateway API on 18789)."""
-    url, proc = _port_forward("nemoclaw-openclaw", agent_namespace, 18789)
+    """Port-forward to NemoClaw OpenClaw agent (gateway via socat on 8080)."""
+    url, proc = _port_forward("nemoclaw-openclaw", agent_namespace, 8080)
     if not url:
         pytest.skip("Cannot reach nemoclaw-openclaw (not deployed or image missing)")
     yield url
@@ -649,7 +649,7 @@ NEMOCLAW_AGENT_CONFIG = {
         "protocol": "openai",
     },
     "nemoclaw-openclaw": {
-        "port": 18789,
+        "port": 8080,
         "health_path": "/",
         "api_path": "/",
         "protocol": "gateway",
