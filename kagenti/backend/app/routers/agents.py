@@ -3960,12 +3960,14 @@ async def get_agent_identity_config(
     except ApiException as e:
         raise HTTPException(status_code=502, detail=str(e.reason))
 
+    attempts = 0
     for endpoint_slice in endpoint_slices.get("items", []):
         for endpoint in endpoint_slice.get("endpoints", []):
             for address in endpoint.get("addresses", []):
+                attempts = attempts+1
+                # AuthBridge serves config and status on port 9093
+                url = f"http://{address}:9093/config"
                 try:
-                    # AuthBridge serves config and status on port 9093
-                    url = f"http://{address}:9093/config"
                     r = urlopen(url, timeout=10)
                     data = json.loads(r.read())
                     data["AuthBridge"] = True
@@ -3973,7 +3975,11 @@ async def get_agent_identity_config(
                 except Exception as e:
                     # Ignore exceptions -- it could mean a pod is not ready,
                     # Check the next endpoint.
+                    logger.info(msg=f"Failed to talk to url {url}: {e}; skipping")
                     pass
+
+    if attempts == 0:
+        raise HTTPException(status_code=404, detail=f"{name} not found")
 
     logger.info(f"Could not invoke any AuthBridge endpoints for {namespace}/{name}")
     return {"AuthBridge": False}
@@ -3994,12 +4000,14 @@ async def get_agent_identity_status(
     except ApiException as e:
         raise HTTPException(status_code=502, detail=str(e.reason))
 
+    attempts = 0
     for endpoint_slice in endpoint_slices.get("items", []):
         for endpoint in endpoint_slice.get("endpoints", []):
             for address in endpoint.get("addresses", []):
+                attempts = attempts+1
+                # AuthBridge serves config and status on port 9093
+                url = f"http://{address}:9093/stats"
                 try:
-                    # AuthBridge serves config and status on port 9093
-                    url = f"http://{address}:9093/stats"
                     r = urlopen(url, timeout=10)
                     data = json.loads(r.read())
                     data["AuthBridge"] = True
@@ -4007,7 +4015,11 @@ async def get_agent_identity_status(
                 except Exception as e:
                     # Ignore exceptions -- it could mean a pod is not ready,
                     # Check the next endpoint.
+                    logger.info(msg=f"Failed to talk to url {url}: {e}; skipping")
                     pass
+
+    if attempts == 0:
+        raise HTTPException(status_code=404, detail=f"{name} not found")
 
     logger.info(f"Could not invoke any AuthBridge endpoints for {namespace}/{name}")
     return {"AuthBridge": False}
