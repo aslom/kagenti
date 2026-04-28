@@ -36,6 +36,8 @@ AVD-KSV-0125
 # Internal agent base image uses :latest (built on-cluster, no external tag)
 AVD-DS-0001
 
+# --- OpenShell PoC agents (remove when MVP Helm chart replaces kustomize) ---
+
 # OpenShell agent-sandbox-controller (upstream NVIDIA component)
 # KSV-0014 and KSV-0118 are fixed via kustomize patch
 # (deployments/openshell/agent-sandbox-security-patch.yaml)

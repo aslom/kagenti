@@ -199,3 +199,4 @@ kagenti/kubectl-kagenti/kubectl-kagenti
 .codeql-analyze-python.log
 .codeql-results-python.sarif
 .cves/
+.claude/scheduled_tasks.lock

@@ -180,7 +180,7 @@ External clients obtain tokens by POSTing to the Keycloak token endpoint:
 
 ```bash
 # Using the default test credential (development/testing only)
-curl -X POST "http://keycloak.localtest.me:8080/realms/demo/protocol/openid-connect/token" \
+curl -X POST "http://keycloak.localtest.me:8080/realms/kagenti/protocol/openid-connect/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d "grant_type=client_credentials" \
   -d "client_id=kagenti-api" \

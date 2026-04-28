@@ -1,5 +1,11 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
+#
+# Vendored from: github.com/kubernetes-sigs/agent-sandbox @ v0.1.0
+# Image: registry.k8s.io/agent-sandbox/agent-sandbox-controller:v0.1.0
+# Includes: Namespace, ServiceAccount, ClusterRole, ClusterRoleBinding,
+#   StatefulSet (controller), and Sandbox CRD (agents.x-k8s.io/v1alpha1)
+# Security hardened: readOnlyRootFilesystem, seccompProfile, drop ALL caps
 
 ---
 kind: Namespace
