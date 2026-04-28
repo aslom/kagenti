@@ -74,6 +74,12 @@ AGENT_SANDBOX_CRD_GROUP = "agents.x-k8s.io"
 AGENT_SANDBOX_CRD_VERSION = "v1alpha1"
 AGENT_SANDBOX_PLURAL = "sandboxes"
 
+# agent-sandbox extensions (SandboxTemplate, SandboxClaim)
+AGENT_SANDBOX_EXT_GROUP = "extensions.agents.x-k8s.io"
+AGENT_SANDBOX_EXT_VERSION = "v1alpha1"
+AGENT_SANDBOX_TEMPLATE_PLURAL = "sandboxtemplates"
+AGENT_SANDBOX_CLAIM_PLURAL = "sandboxclaims"
+
 # Supported workload types (sandbox added conditionally at startup)
 _BASE_WORKLOAD_TYPES = (
     WORKLOAD_TYPE_DEPLOYMENT,
