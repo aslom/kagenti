@@ -558,8 +558,12 @@ EOLITELLM
             *) kubectl rollout status "$deploy" -n team1 --timeout=180s 2>/dev/null || log_warn "$deploy rollout not complete" ;;
         esac
     done
-    # Extra wait for readiness probes to pass after rollout
-    sleep 5
+    # Wait for all non-NemoClaw agent pods to be ready (CI needs more time)
+    log_step "Waiting for agent pods to become ready..."
+    kubectl wait --for=condition=ready pod -n team1 -l kagenti.io/type=agent \
+        --field-selector=status.phase!=Failed --timeout=300s 2>/dev/null || {
+        log_warn "Some agent pods not ready after 5 minutes"
+    }
     kubectl get pods -n team1 -l kagenti.io/type=agent
 else
     log_phase "PHASE 4: Skipping Agent Deployment"
