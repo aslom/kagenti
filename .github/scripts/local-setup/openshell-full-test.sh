@@ -521,10 +521,6 @@ EOLITELLM
         LITELLM_URL="http://$LITELLM_PROXY_NAME.team1.svc:4000/v1"
         log_step "Patching agents to use LiteLLM proxy at $LITELLM_URL"
 
-        kubectl set env deploy/adk-agent -n team1 \
-            "OPENAI_API_BASE=$LITELLM_URL" \
-            "LLM_MODEL=openai/$LITEMAAS_MODEL" 2>/dev/null || true
-
         kubectl set env deploy/claude-sdk-agent -n team1 \
             "ANTHROPIC_BASE_URL=$LITELLM_URL" \
             "ANTHROPIC_MODEL=$LITEMAAS_MODEL" 2>/dev/null || true

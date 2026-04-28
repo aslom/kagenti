@@ -120,30 +120,6 @@ def _port_forward(name: str, namespace: str, remote_port: int):
 
 
 @pytest.fixture(scope="session")
-def weather_agent_url(agent_namespace, agent_port):
-    """Port-forward to weather-agent (non-supervised only)."""
-    url, proc = _port_forward("weather-agent", agent_namespace, agent_port)
-    if not url:
-        pytest.skip("Cannot reach weather-agent (not deployed or port-forward failed)")
-    yield url
-    if proc:
-        proc.terminate()
-        proc.wait()
-
-
-@pytest.fixture(scope="session")
-def adk_agent_url(agent_namespace, agent_port):
-    """Port-forward to ADK agent (may fail if supervisor netns blocks it)."""
-    url, proc = _port_forward("adk-agent", agent_namespace, agent_port)
-    if not url:
-        pytest.skip("Cannot reach ADK agent — supervisor netns blocks port-forward")
-    yield url
-    if proc:
-        proc.terminate()
-        proc.wait()
-
-
-@pytest.fixture(scope="session")
 def adk_agent_supervised_url(agent_namespace, agent_port):
     """Port-forward to supervised ADK agent via port-bridge sidecar."""
     url, proc = _port_forward("adk-agent-supervised", agent_namespace, agent_port)
@@ -550,9 +526,8 @@ CANONICAL_CI_LOG = """
 # ---------------------------------------------------------------------------
 
 ALL_A2A_AGENTS = [
-    pytest.param("weather-agent", id="weather_agent"),
-    pytest.param("adk-agent", id="adk_agent"),
     pytest.param("claude-sdk-agent", id="claude_sdk_agent"),
+    pytest.param("adk-agent-supervised", id="adk_supervised"),
     pytest.param("weather-agent-supervised", id="weather_supervised"),
 ]
 
@@ -565,7 +540,7 @@ NEMOCLAW_AGENTS = [
 ]
 
 LLM_CAPABLE_AGENTS = {
-    "adk-agent",
+    "adk-agent-supervised",
     "claude-sdk-agent",
     "nemoclaw-hermes",
     "nemoclaw-openclaw",
@@ -601,20 +576,15 @@ ALL_SANDBOX_TYPES = [
 
 # Agent-specific prompts for multi-turn tests
 AGENT_PROMPTS = {
-    "weather-agent": [
-        "Weather in London?",
-        "Compare that to Paris.",
-        "Which is warmer?",
-    ],
-    "adk-agent": [
-        "I have a Python JSON parser.",
-        "Add error handling.",
-        "Review the result.",
-    ],
     "claude-sdk-agent": [
         "Review: def add(a,b): return a+b",
         "Add type hints.",
         "Add tests.",
+    ],
+    "adk-agent-supervised": [
+        "I have a Python JSON parser.",
+        "Add error handling.",
+        "Review the result.",
     ],
     "weather-agent-supervised": [
         "Weather in Berlin?",
@@ -635,9 +605,8 @@ AGENT_PROMPTS = {
 
 # Map agent name to fixture name (for parametrized tests)
 FIXTURE_MAP = {
-    "weather-agent": "weather_agent_url",
-    "adk-agent": "adk_agent_url",
     "claude-sdk-agent": "claude_sdk_agent_url",
+    "adk-agent-supervised": "adk_agent_supervised_url",
 }
 
 # NemoClaw agent port/protocol mapping
