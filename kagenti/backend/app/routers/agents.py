@@ -3150,7 +3150,12 @@ async def create_agent(
         if e.status == 404:
             raise HTTPException(
                 status_code=404,
-                detail="Agent CRD not found. Is the kagenti-operator installed?",
+                detail=(
+                    f"Required CRD or resource not found for workload type "
+                    f"'{request.workloadType}'. Ensure the necessary controllers "
+                    f"are installed (e.g. Shipwright for source builds, "
+                    f"agent-sandbox controller for sandbox workloads)."
+                ),
             )
         logger.error(f"Failed to create agent: {e}")
         raise HTTPException(status_code=e.status, detail=str(e.reason))
