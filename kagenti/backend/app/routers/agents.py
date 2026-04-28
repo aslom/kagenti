@@ -3951,44 +3951,26 @@ async def get_agent_identity_config(
     Fetch the AuthBridge configuration for an Agent.
     """
 
-    # It would be better to check the workload for AuthBridge first, perhaps by
-    # checking for `kagenti.io/inject` label, or explicitly fetching sidecar.
-    # TODO define mechanism to used metadata rather than explicitly contacting instances
+    namespace = sanitize_log(namespace)
+    name = sanitize_log(name)
 
-    # Try to get Endpoint Slices
     try:
-        endpoint_slices = kube.get_endpoint_slices(namespace=namespace, name=name)
+        addresses = _get_service_endpoints(namespace=namespace, name=name)
     except ApiException as e:
         raise HTTPException(status_code=502, detail=str(e.reason))
 
     attempts = 0
-    for endpoint_slice in endpoint_slices.get("items", []):
-        for endpoint in endpoint_slice.get("endpoints", []):
-            for address in endpoint.get("addresses", []):
-                attempts += 1
-                # AuthBridge serves config and status on port 9093
-                url = f"http://{address}:9093/config"
-                try:
-                    async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-                        logger.debug(f"Making HTTP request to {url}")
-                        response = await client.get(url)
-                        response.raise_for_status()
-
-                        # Validate content isn't too large (max 1MB)
-                        content = response.text
-                        if len(content) > 1024 * 1024:
-                            raise HTTPException(
-                                status_code=413, detail="File content too large (max 1MB)"
-                            )
-
-                        data = json.loads(content)
-                        data["AuthBridge"] = True
-                        return data
-                except Exception:
-                    # Ignore exceptions -- it could mean a pod is not ready,
-                    # Check the next endpoint.
-                    logger.info("Failed to talk to url %s; skipping", url, exc_info=True)
-                    pass
+    for address in addresses:
+        attempts += 1
+        # AuthBridge serves config and status on port 9093
+        url = f"http://{address}:9093/config"
+        try:
+            data = await _fetch_authbridge_json(url)
+            data["AuthBridge"] = True
+            return data
+        except Exception:
+            logger.info("Failed to talk to url %s; skipping", url, exc_info=True)
+            pass
 
     if attempts == 0:
         raise HTTPException(status_code=404, detail=f"{name} not found")
@@ -4009,43 +3991,70 @@ async def get_agent_identity_status(
     Fetch the AuthBridge statistics and status for an Agent.
     """
 
-    # Try to get Endpoint Slices for the Agent
+    namespace = sanitize_log(namespace)
+    name = sanitize_log(name)
+
     try:
-        endpoint_slices = kube.get_endpoint_slices(namespace=namespace, name=name)
+        addresses = _get_service_endpoints(namespace=namespace, name=name)
     except ApiException as e:
         raise HTTPException(status_code=502, detail=str(e.reason))
 
     attempts = 0
-    for endpoint_slice in endpoint_slices.get("items", []):
-        for endpoint in endpoint_slice.get("endpoints", []):
-            for address in endpoint.get("addresses", []):
-                attempts += 1
-                # AuthBridge serves config and status on port 9093
-                url = f"http://{address}:9093/stats"
-                try:
-                    async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-                        logger.debug(f"Making HTTP request to {url}")
-                        response = await client.get(url)
-                        response.raise_for_status()
-
-                        # Validate content isn't too large (max 1MB)
-                        content = response.text
-                        if len(content) > 1024 * 1024:
-                            raise HTTPException(
-                                status_code=413, detail="File content too large (max 1MB)"
-                            )
-
-                        data = json.loads(content)
-                        data["AuthBridge"] = True
-                        return data
-                except Exception:
-                    # Ignore exceptions -- it could mean a pod is not ready,
-                    # Check the next endpoint.
-                    logger.info("Failed to talk to url %s; skipping", url, exc_info=True)
-                    pass
+    for address in addresses:
+        attempts += 1
+        # AuthBridge serves config and status on port 9093
+        url = f"http://{address}:9093/stats"
+        try:
+            data = await _fetch_authbridge_json(url)
+            data["AuthBridge"] = True
+            return data
+        except Exception:
+            logger.info("Failed to talk to url %s; skipping", url, exc_info=True)
+            pass
 
     if attempts == 0:
         raise HTTPException(status_code=404, detail=f"{name} not found")
 
     logger.info("Could not invoke any AuthBridge endpoints for %s/%s", namespace, name)
     return {"AuthBridge": False}
+
+
+def _get_service_endpoints(
+    namespace: str, name: str, kube: KubernetesService = Depends(get_kubernetes_service)
+) -> List[str]:
+    """
+    Get addresses for a K8s service
+    """
+
+    addresses: list[str] = []
+    endpoint_slices = kube.get_endpoint_slices(namespace=namespace, name=name)
+
+    for endpoint_slice in endpoint_slices.get("items", []):
+        for endpoint in endpoint_slice.get("endpoints", []):
+            for address in endpoint.get("addresses", []):
+                addresses.append(address)
+
+    return addresses
+
+
+async def _fetch_authbridge_json(url: str) -> dict:
+    """
+    Fetch JSON from an AuthBridge sidecar endpoint.
+
+    Raises on HTTP errors, oversized responses, or non-dict payloads.
+    """
+
+    async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+        logger.debug("Making HTTP request to %s", url)
+        response = await client.get(url)
+        response.raise_for_status()
+
+        content = response.text
+        if len(content) > 1024 * 1024:
+            raise HTTPException(status_code=502, detail="File content too large (max 1MB)")
+
+        data = json.loads(content)
+        if not isinstance(data, dict):
+            raise HTTPException(status_code=502, detail="File content not AuthBridge JSON")
+
+        return data

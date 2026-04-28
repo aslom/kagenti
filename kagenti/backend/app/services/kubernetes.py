@@ -505,6 +505,8 @@ class KubernetesService:
 
     def get_endpoint_slices(self, namespace: str, name: str) -> dict:
         """Get a EndpointSlices for a named Service."""
+        namespace = _sanitize(namespace)
+        name = _sanitize(name)
         try:
             result = self.discovery_v1_api.list_namespaced_endpoint_slice(
                 namespace=namespace, label_selector=f"kubernetes.io/service-name={name}"
