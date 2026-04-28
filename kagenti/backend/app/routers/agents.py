@@ -3984,7 +3984,7 @@ async def get_agent_identity_config(
                         data = json.loads(content)
                         data["AuthBridge"] = True
                         return data
-                except Exception as e:
+                except Exception:
                     # Ignore exceptions -- it could mean a pod is not ready,
                     # Check the next endpoint.
                     logger.info("Failed to talk to url %s; skipping", url, exc_info=True)
@@ -4038,7 +4038,7 @@ async def get_agent_identity_status(
                         data = json.loads(content)
                         data["AuthBridge"] = True
                         return data
-                except Exception as e:
+                except Exception:
                     # Ignore exceptions -- it could mean a pod is not ready,
                     # Check the next endpoint.
                     logger.info("Failed to talk to url %s; skipping", url, exc_info=True)

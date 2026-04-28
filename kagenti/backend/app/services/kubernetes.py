@@ -510,7 +510,7 @@ class KubernetesService:
                 namespace=namespace, label_selector=f"kubernetes.io/service-name={name}"
             )
             return result.to_dict()
-        except ApiException as e:
+        except ApiException:
             logger.error(
                 "Error getting EndpointSlices for Service %s/%s", namespace, name, exc_info=True
             )
