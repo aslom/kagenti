@@ -3078,10 +3078,20 @@ async def create_agent(
                     body=template_manifest,
                 )
                 claim_manifest = _build_sandbox_claim_manifest(request=request)
-                kube.create_sandbox_claim(
-                    namespace=request.namespace,
-                    body=claim_manifest,
-                )
+                try:
+                    kube.create_sandbox_claim(
+                        namespace=request.namespace,
+                        body=claim_manifest,
+                    )
+                except Exception:
+                    try:
+                        kube.delete_sandbox_template(namespace=request.namespace, name=request.name)
+                    except Exception:
+                        logger.warning(
+                            "Failed to clean up orphaned SandboxTemplate '%s'",
+                            request.name,
+                        )
+                    raise
                 logger.info(
                     f"Created SandboxTemplate + SandboxClaim '{request.name}' "
                     f"in namespace '{request.namespace}'"
@@ -3623,7 +3633,14 @@ async def finalize_shipwright_build(
                 shipwright_build_name=name,
             )
             claim_manifest["metadata"]["labels"].update(kagenti_build_labels)
-            kube.create_sandbox_claim(namespace=namespace, body=claim_manifest)
+            try:
+                kube.create_sandbox_claim(namespace=namespace, body=claim_manifest)
+            except Exception:
+                try:
+                    kube.delete_sandbox_template(namespace=namespace, name=name)
+                except Exception:
+                    logger.warning("Failed to clean up orphaned SandboxTemplate '%s'", name)
+                raise
             logger.info(
                 f"Created SandboxTemplate + SandboxClaim '{name}' "
                 f"in namespace '{namespace}' from build"
