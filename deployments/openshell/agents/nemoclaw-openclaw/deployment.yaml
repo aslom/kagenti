@@ -30,32 +30,6 @@ metadata:
     app.kubernetes.io/component: config
     app.kubernetes.io/managed-by: openshell
 data:
-  # Startup script: configure openclaw to use LiteLLM proxy for inference
-  start.sh: |
-    #!/bin/sh
-    set -e
-
-    # Configure openclaw to use the in-cluster LiteLLM proxy
-    mkdir -p /sandbox/.openclaw /sandbox/.openclaw-data
-
-    cat > /sandbox/.openclaw/openclaw.json <<EOCFG
-    {
-      "model": "${LLM_MODEL:-gpt-4o-mini}",
-      "provider": "custom",
-      "customProvider": {
-        "baseUrl": "${OPENAI_API_BASE:-http://litellm-model-proxy.team1.svc:4000/v1}",
-        "apiKeyEnv": "OPENAI_API_KEY"
-      },
-      "gateway": {
-        "port": 18789,
-        "host": "0.0.0.0"
-      }
-    }
-    EOCFG
-
-    # Start openclaw gateway (must be pre-installed in the image)
-    exec openclaw gateway run --config /sandbox/.openclaw/openclaw.json
-  # OPA sandbox policy
   policy.yaml: |
     version: 1
     filesystem_policy:
@@ -125,10 +99,10 @@ spec:
           type: RuntimeDefault
       containers:
       - name: agent
-        # TODO(nemoclaw-images): Replace with proper NemoClaw openclaw image
-        image: ghcr.io/nvidia/openshell-community/sandboxes/base:latest
+        # Built from NemoClaw v0.0.28 / OpenClaw v2026.4.9
+        # Source: deployments/openshell/agents/nemoclaw-openclaw/Dockerfile
+        image: nemoclaw-openclaw:latest
         imagePullPolicy: IfNotPresent
-        command: ["/bin/sh", "/etc/nemoclaw/start.sh"]
         securityContext:
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: true
@@ -168,8 +142,8 @@ spec:
         - name: config
           mountPath: /etc/nemoclaw
           readOnly: true
-        - name: sandbox
-          mountPath: /sandbox
+        - name: home
+          mountPath: /home/node
         - name: tmp
           mountPath: /tmp
       volumes:
@@ -177,7 +151,7 @@ spec:
         configMap:
           name: nemoclaw-openclaw-config
           defaultMode: 0755
-      - name: sandbox
+      - name: home
         emptyDir: {}
       - name: tmp
         emptyDir: {}
