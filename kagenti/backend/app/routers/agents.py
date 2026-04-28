@@ -63,6 +63,8 @@ from app.core.constants import (
     WORKLOAD_TYPE_SANDBOX,
     AGENT_SANDBOX_CRD_GROUP,
     AGENT_SANDBOX_CRD_VERSION,
+    AGENT_SANDBOX_EXT_GROUP,
+    AGENT_SANDBOX_EXT_VERSION,
     SUPPORTED_WORKLOAD_TYPES,
     # Migration constants (Phase 4)
     MIGRATION_SOURCE_ANNOTATION,
@@ -654,21 +656,21 @@ async def list_agents(
                 )
             )
 
-        # Query Sandboxes with agent label (feature-flagged)
+        # Query SandboxClaims with agent label (feature-flagged)
         if settings.kagenti_feature_flag_agent_sandbox:
             try:
-                sandboxes = kube.list_sandboxes(
+                claims = kube.list_sandbox_claims(
                     namespace=namespace,
                     label_selector=label_selector,
                 )
-                for sandbox in sandboxes:
-                    metadata = sandbox.get("metadata", {})
+                for claim in claims:
+                    metadata = claim.get("metadata", {})
                     name = metadata.get("name", "")
                     if name in agent_names:
                         logger.warning(
-                            f"Duplicate agent name '{name}' detected: Sandbox skipped because "
-                            f"a workload with the same name already exists in namespace '{namespace}'. "
-                            "This may indicate a configuration issue."
+                            f"Duplicate agent name '{name}' detected: SandboxClaim skipped "
+                            f"because a workload with the same name already exists in "
+                            f"namespace '{namespace}'. This may indicate a configuration issue."
                         )
                         continue
                     agent_names.add(name)
@@ -678,8 +680,8 @@ async def list_agents(
                         AgentSummary(
                             name=name,
                             namespace=metadata.get("namespace", namespace),
-                            description=_get_sandbox_description(sandbox),
-                            status=_is_sandbox_ready(sandbox),
+                            description=_get_sandbox_description(claim),
+                            status=_is_sandbox_ready(claim),
                             labels=_extract_labels(labels),
                             workloadType=WORKLOAD_TYPE_SANDBOX,
                             createdAt=_format_timestamp(
@@ -690,11 +692,11 @@ async def list_agents(
                     )
             except ApiException as e:
                 if e.status == 404:
-                    logger.debug("Sandbox CRD not installed")
+                    logger.debug("SandboxClaim CRD not installed")
                 elif e.status == 403:
-                    logger.debug("Sandbox RBAC: insufficient permissions")
+                    logger.debug("SandboxClaim RBAC: insufficient permissions")
                 else:
-                    logger.warning(f"Failed to list Sandboxes: {e.reason}")
+                    logger.warning(f"Failed to list SandboxClaims: {e.reason}")
 
         # Backward compatibility: Also list legacy Agent CRDs (during migration period)
         if settings.enable_legacy_agent_crd:
@@ -798,10 +800,10 @@ async def get_agent(
             if e.status != 404:
                 raise HTTPException(status_code=e.status, detail=str(e.reason))
 
-    # If still not found, try Sandbox (feature-flagged)
+    # If still not found, try SandboxClaim (feature-flagged)
     if workload is None and settings.kagenti_feature_flag_agent_sandbox:
         try:
-            workload = kube.get_sandbox(namespace=namespace, name=name)
+            workload = kube.get_sandbox_claim(namespace=namespace, name=name)
             workload_type = WORKLOAD_TYPE_SANDBOX
         except ApiException as e:
             if e.status != 404:
@@ -933,16 +935,24 @@ async def delete_agent(
         else:
             logger.warning("Failed to delete Job '%s': %s", safe_name, e.reason)
 
-    # Delete the Sandbox (if exists)
+    # Delete the SandboxClaim + SandboxTemplate (if exists)
     if settings.kagenti_feature_flag_agent_sandbox:
         try:
-            kube.delete_sandbox(namespace=namespace, name=name)
-            messages.append(f"Sandbox '{name}' deleted")
+            kube.delete_sandbox_claim(namespace=namespace, name=name)
+            messages.append(f"SandboxClaim '{name}' deleted")
         except ApiException as e:
             if e.status == 404:
-                logger.debug("Sandbox '%s' not found (may be other workload type)", safe_name)
+                logger.debug("SandboxClaim '%s' not found (may be other workload type)", safe_name)
             else:
-                logger.warning("Failed to delete Sandbox '%s': %s", safe_name, e.reason)
+                logger.warning("Failed to delete SandboxClaim '%s': %s", safe_name, e.reason)
+        try:
+            kube.delete_sandbox_template(namespace=namespace, name=name)
+            messages.append(f"SandboxTemplate '{name}' deleted")
+        except ApiException as e:
+            if e.status == 404:
+                logger.debug("SandboxTemplate '%s' not found", safe_name)
+            else:
+                logger.warning("Failed to delete SandboxTemplate '%s': %s", safe_name, e.reason)
 
     # Delete the Service
     try:
@@ -2835,12 +2845,12 @@ def _build_job_manifest(
     return manifest
 
 
-def _build_sandbox_manifest(
+def _build_sandbox_template_manifest(
     request: "CreateAgentRequest",
     image: str,
     shipwright_build_name: Optional[str] = None,
 ) -> dict:
-    """Build a Sandbox CR manifest for an agent (agents.x-k8s.io/v1alpha1)."""
+    """Build a SandboxTemplate manifest (extensions.agents.x-k8s.io/v1alpha1)."""
     env_vars = _build_env_vars(request)
     labels = _build_common_labels(request, WORKLOAD_TYPE_SANDBOX)
 
@@ -2855,8 +2865,8 @@ def _build_sandbox_manifest(
         container_port = request.servicePorts[0].targetPort
 
     manifest = {
-        "apiVersion": f"{AGENT_SANDBOX_CRD_GROUP}/{AGENT_SANDBOX_CRD_VERSION}",
-        "kind": "Sandbox",
+        "apiVersion": f"{AGENT_SANDBOX_EXT_GROUP}/{AGENT_SANDBOX_EXT_VERSION}",
+        "kind": "SandboxTemplate",
         "metadata": {
             "name": request.name,
             "namespace": request.namespace,
@@ -2913,6 +2923,34 @@ def _build_sandbox_manifest(
         ]
 
     return manifest
+
+
+def _build_sandbox_claim_manifest(
+    request: "CreateAgentRequest",
+    shipwright_build_name: Optional[str] = None,
+) -> dict:
+    """Build a SandboxClaim manifest (extensions.agents.x-k8s.io/v1alpha1)."""
+    labels = _build_common_labels(request, WORKLOAD_TYPE_SANDBOX)
+
+    annotations: Dict[str, str] = {
+        KAGENTI_DESCRIPTION_ANNOTATION: f"Agent '{request.name}' deployed from UI.",
+    }
+    if shipwright_build_name:
+        annotations["kagenti.io/shipwright-build"] = shipwright_build_name
+
+    return {
+        "apiVersion": f"{AGENT_SANDBOX_EXT_GROUP}/{AGENT_SANDBOX_EXT_VERSION}",
+        "kind": "SandboxClaim",
+        "metadata": {
+            "name": request.name,
+            "namespace": request.namespace,
+            "labels": labels,
+            "annotations": annotations,
+        },
+        "spec": {
+            "sandboxTemplateRef": {"name": request.name},
+        },
+    }
 
 
 @router.post(
@@ -3031,15 +3069,23 @@ async def create_agent(
                 )
                 logger.info(f"Created Job '{request.name}' in namespace '{request.namespace}'")
             elif request.workloadType == WORKLOAD_TYPE_SANDBOX:
-                workload_manifest = _build_sandbox_manifest(
+                template_manifest = _build_sandbox_template_manifest(
                     request=request,
                     image=request.containerImage,
                 )
-                kube.create_sandbox(
+                kube.create_sandbox_template(
                     namespace=request.namespace,
-                    body=workload_manifest,
+                    body=template_manifest,
                 )
-                logger.info(f"Created Sandbox '{request.name}' in namespace '{request.namespace}'")
+                claim_manifest = _build_sandbox_claim_manifest(request=request)
+                kube.create_sandbox_claim(
+                    namespace=request.namespace,
+                    body=claim_manifest,
+                )
+                logger.info(
+                    f"Created SandboxTemplate + SandboxClaim '{request.name}' "
+                    f"in namespace '{request.namespace}'"
+                )
 
             # Create Service (not needed for Jobs or Sandboxes)
             if request.workloadType not in (WORKLOAD_TYPE_JOB, WORKLOAD_TYPE_SANDBOX):
@@ -3304,7 +3350,7 @@ async def finalize_shipwright_build(
                     raise
         if not workload_exists and settings.kagenti_feature_flag_agent_sandbox:
             try:
-                kube.get_sandbox(namespace=namespace, name=name)
+                kube.get_sandbox_claim(namespace=namespace, name=name)
                 workload_exists = True
                 existing_workload_type = WORKLOAD_TYPE_SANDBOX
             except ApiException as e:
@@ -3559,7 +3605,7 @@ async def finalize_shipwright_build(
                 f"Created Job '{name}' with image '{container_image}' in namespace '{namespace}'"
             )
         elif final_workload_type == WORKLOAD_TYPE_SANDBOX:
-            workload_manifest = _build_sandbox_manifest(
+            template_manifest = _build_sandbox_template_manifest(
                 request=agent_request,
                 image=container_image,
                 shipwright_build_name=name,
@@ -3567,15 +3613,21 @@ async def finalize_shipwright_build(
             kagenti_build_labels = {
                 k: v for k, v in build_labels.items() if k.startswith(settings.kagenti_label_prefix)
             }
-            workload_manifest["metadata"]["labels"].update(kagenti_build_labels)
-            workload_manifest["spec"]["podTemplate"]["metadata"]["labels"].update(
+            template_manifest["metadata"]["labels"].update(kagenti_build_labels)
+            template_manifest["spec"]["podTemplate"]["metadata"]["labels"].update(
                 kagenti_build_labels
             )
-            kube.create_sandbox(
-                namespace=namespace,
-                body=workload_manifest,
+            kube.create_sandbox_template(namespace=namespace, body=template_manifest)
+            claim_manifest = _build_sandbox_claim_manifest(
+                request=agent_request,
+                shipwright_build_name=name,
             )
-            logger.info(f"Created Sandbox '{name}' in namespace '{namespace}' from build")
+            claim_manifest["metadata"]["labels"].update(kagenti_build_labels)
+            kube.create_sandbox_claim(namespace=namespace, body=claim_manifest)
+            logger.info(
+                f"Created SandboxTemplate + SandboxClaim '{name}' "
+                f"in namespace '{namespace}' from build"
+            )
 
         # Create Service (not needed for Jobs or Sandboxes)
         if final_workload_type not in (WORKLOAD_TYPE_JOB, WORKLOAD_TYPE_SANDBOX):
