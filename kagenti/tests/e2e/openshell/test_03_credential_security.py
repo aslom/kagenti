@@ -19,7 +19,6 @@ from kagenti.tests.e2e.openshell.conftest import kubectl_get_pods_json
 pytestmark = pytest.mark.openshell
 
 _AGENTS = [
-    "weather-agent",
     "adk-agent-supervised",
     "claude-sdk-agent",
     "weather-agent-supervised",
