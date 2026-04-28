@@ -3987,7 +3987,7 @@ async def get_agent_identity_config(
                 except Exception as e:
                     # Ignore exceptions -- it could mean a pod is not ready,
                     # Check the next endpoint.
-                    logger.info(msg=f"Failed to talk to url {url}: {e}; skipping")
+                    logger.info("Failed to talk to url %s; skipping", url, exc_info=True)
                     pass
 
     if attempts == 0:
@@ -4041,7 +4041,7 @@ async def get_agent_identity_status(
                 except Exception as e:
                     # Ignore exceptions -- it could mean a pod is not ready,
                     # Check the next endpoint.
-                    logger.info(msg=f"Failed to talk to url {url}: {e}; skipping")
+                    logger.info("Failed to talk to url %s; skipping", url, exc_info=True)
                     pass
 
     if attempts == 0:
