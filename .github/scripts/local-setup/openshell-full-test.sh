@@ -168,6 +168,11 @@ echo "    test:             $([ "$SKIP_TEST"    = "true" ] && echo SKIP || echo 
 echo "    cluster-destroy:  $([ "$SKIP_DESTROY" = "true" ] && echo SKIP || echo RUN)"
 echo ""
 
+# ── Ensure boto3 for Ansible AWS modules (HyperShift cluster lifecycle) ──
+if [ "$PLATFORM" = "ocp" ]; then
+    pip install boto3 botocore 2>/dev/null || true
+fi
+
 # ============================================================================
 # PHASE 1: Create Cluster
 # ============================================================================

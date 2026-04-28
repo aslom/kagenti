@@ -3,7 +3,7 @@
 # hadolint ignore=DL3007
 FROM ghcr.io/nvidia/openshell/supervisor:latest AS supervisor
 
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:4386a385d81dba9f72ed72a6fe4237755d7f5440c84b417650f38336bbc43117
 
 # iproute2 needed for supervisor netns creation, bash for entrypoint
 RUN apt-get update && apt-get install -y --no-install-recommends iproute2 bash && \

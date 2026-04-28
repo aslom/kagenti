@@ -7,7 +7,7 @@
 # Simplified: no NemoClaw plugin, no blueprint, no exec-approvals patch.
 # socat bridges from 0.0.0.0:8080 to loopback:18789 for K8s access.
 
-FROM node:22-slim
+FROM node:22-slim@sha256:2fc5ec124496f2fb49b8da251c8b4b674c6b96c1f2176f6c77fa23ec7e9af7d7
 
 ARG OPENCLAW_VERSION=2026.4.9
 
