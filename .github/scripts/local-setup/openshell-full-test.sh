@@ -559,11 +559,14 @@ EOLITELLM
         esac
     done
     # Wait for all non-NemoClaw agent pods to be ready (CI needs more time)
-    log_step "Waiting for agent pods to become ready..."
-    kubectl wait --for=condition=ready pod -n team1 -l kagenti.io/type=agent \
-        --field-selector=status.phase!=Failed --timeout=300s 2>/dev/null || {
-        log_warn "Some agent pods not ready after 5 minutes"
-    }
+    log_step "Waiting for non-NemoClaw agent pods to become ready..."
+    for deploy in $(kubectl get deploy -n team1 -l kagenti.io/type=agent -o name 2>/dev/null); do
+        case "$deploy" in
+            *nemoclaw*) ;; # Skip — NemoClaw images may not be available
+            *) kubectl wait --for=condition=available "$deploy" -n team1 --timeout=300s 2>/dev/null || \
+                   log_warn "$deploy not available after 5 minutes" ;;
+        esac
+    done
     kubectl get pods -n team1 -l kagenti.io/type=agent
 else
     log_phase "PHASE 4: Skipping Agent Deployment"
