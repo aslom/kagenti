@@ -55,18 +55,12 @@ def _deploy_ready(name: str, namespace: str) -> bool:
 class TestA2AConnectivity:
     """Basic A2A JSON-RPC message/send connectivity for all agents."""
 
-    async def test_hello__weather_agent__a2a_response(self, weather_agent_url):
-        """Weather agent responds to A2A message/send (no LLM needed)."""
+    async def test_hello__adk_supervised__a2a_response(self, adk_agent_supervised_url):
+        """ADK supervised agent responds to A2A message/send (LLM optional)."""
         async with httpx.AsyncClient() as client:
-            resp = await a2a_send(client, weather_agent_url, "Hello, who are you?")
-        assert "result" in resp, f"A2A response missing 'result': {resp}"
-        text = extract_a2a_text(resp)
-        assert text, "Empty response from weather agent"
-
-    async def test_hello__adk_agent__a2a_response(self, adk_agent_url):
-        """ADK agent responds to A2A message/send (LLM optional)."""
-        async with httpx.AsyncClient() as client:
-            resp = await a2a_send(client, adk_agent_url, "Hello, who are you?")
+            resp = await a2a_send(
+                client, adk_agent_supervised_url, "Hello, who are you?"
+            )
         assert "result" in resp, f"A2A response missing 'result': {resp}"
 
     async def test_hello__claude_sdk_agent__a2a_response(self, claude_sdk_agent_url):
@@ -97,25 +91,18 @@ class TestA2AConnectivity:
 class TestAgentCardDiscovery:
     """Verify .well-known/agent-card.json is discoverable for all A2A agents."""
 
-    async def test_agent_card__weather_agent__well_known(self, weather_agent_url):
-        """Weather agent exposes agent card at .well-known endpoint."""
+    async def test_agent_card__adk_supervised__well_known(
+        self, adk_agent_supervised_url
+    ):
+        """ADK supervised agent exposes agent card at .well-known endpoint."""
         async with httpx.AsyncClient() as client:
             resp = await client.get(
-                f"{weather_agent_url}/.well-known/agent-card.json", timeout=30.0
-            )
-        assert resp.status_code == 200
-        card = resp.json()
-        assert "name" in card
-
-    async def test_agent_card__adk_agent__well_known(self, adk_agent_url):
-        """ADK agent exposes agent card at .well-known endpoint."""
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(
-                f"{adk_agent_url}/.well-known/agent.json", timeout=30.0
+                f"{adk_agent_supervised_url}/.well-known/agent.json", timeout=30.0
             )
             if resp.status_code == 404:
                 resp = await client.get(
-                    f"{adk_agent_url}/.well-known/agent-card.json", timeout=30.0
+                    f"{adk_agent_supervised_url}/.well-known/agent-card.json",
+                    timeout=30.0,
                 )
         assert resp.status_code == 200
         card = resp.json()

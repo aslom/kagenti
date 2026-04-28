@@ -132,7 +132,7 @@ class TestPRReviewSkill:
 
     @skip_no_llm
     async def test_pr_review__adk_agent__follows_skill_instructions(
-        self, adk_agent_url
+        self, adk_agent_supervised_url
     ):
         """ADK agent follows pr-review skill instructions."""
         skill = _read_skill("github:pr-review")
@@ -143,7 +143,7 @@ class TestPRReviewSkill:
         async with httpx.AsyncClient() as client:
             resp = await a2a_send(
                 client,
-                adk_agent_url,
+                adk_agent_supervised_url,
                 prompt,
                 request_id="skill-pr-review-adk",
                 timeout=120.0,
@@ -265,7 +265,9 @@ class TestRCASkill:
         ), f"RCA skill didn't identify root cause: {text[:200]}"
 
     @skip_no_llm
-    async def test_rca__adk_agent__follows_skill_instructions(self, adk_agent_url):
+    async def test_rca__adk_agent__follows_skill_instructions(
+        self, adk_agent_supervised_url
+    ):
         """ADK agent follows rca:ci skill instructions."""
         skill = _read_skill("rca:ci")
         prompt = (
@@ -275,7 +277,7 @@ class TestRCASkill:
         async with httpx.AsyncClient() as client:
             resp = await a2a_send(
                 client,
-                adk_agent_url,
+                adk_agent_supervised_url,
                 prompt,
                 request_id="skill-rca-adk",
                 timeout=120.0,
@@ -380,7 +382,9 @@ class TestSecurityReviewSkill:
         )
 
     @skip_no_llm
-    async def test_security_review__adk_agent__follows_skill(self, adk_agent_url):
+    async def test_security_review__adk_agent__follows_skill(
+        self, adk_agent_supervised_url
+    ):
         """ADK agent follows security review skill."""
         skill = _read_skill("test:review")
         prompt = (
@@ -390,7 +394,7 @@ class TestSecurityReviewSkill:
         async with httpx.AsyncClient() as client:
             resp = await a2a_send(
                 client,
-                adk_agent_url,
+                adk_agent_supervised_url,
                 prompt,
                 request_id="skill-security-adk",
                 timeout=120.0,
@@ -556,7 +560,9 @@ class TestRealWorldSkillExecution:
         ), f"Response doesn't identify root cause: {text[:200]}"
 
     @skip_no_llm
-    async def test_real_github_pr__adk_agent__fetches_and_reviews(self, adk_agent_url):
+    async def test_real_github_pr__adk_agent__fetches_and_reviews(
+        self, adk_agent_supervised_url
+    ):
         """ADK agent reviews real GitHub PR."""
         gh_token = os.getenv("GITHUB_TOKEN", "")
         headers = {"Accept": "application/vnd.github.v3.diff"}
@@ -576,7 +582,7 @@ class TestRealWorldSkillExecution:
         async with httpx.AsyncClient() as client:
             resp = await a2a_send(
                 client,
-                adk_agent_url,
+                adk_agent_supervised_url,
                 f"Review this PR diff:\n```diff\n{diff_text}\n```",
                 request_id="github-pr-review-adk",
                 timeout=120.0,

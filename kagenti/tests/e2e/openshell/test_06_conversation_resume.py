@@ -87,8 +87,8 @@ skip_no_crd = pytest.mark.skipif(
 
 
 ALL_A2A_AGENTS_PORTFORWARD = [
-    pytest.param("weather-agent", id="weather_agent"),
-    pytest.param("adk-agent", id="adk_agent"),
+    pytest.param("weather-agent-supervised", id="weather_supervised"),
+    pytest.param("adk-agent-supervised", id="adk_supervised"),
     pytest.param("claude-sdk-agent", id="claude_sdk_agent"),
 ]
 
