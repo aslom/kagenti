@@ -14,6 +14,7 @@ import ipaddress
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Literal, Optional
 from urllib.parse import urlparse
+from urllib.request import urlopen
 
 import httpx
 import yaml
@@ -3937,3 +3938,76 @@ async def fetch_env_from_url(request: FetchEnvUrlRequest) -> FetchEnvUrlResponse
     except Exception as e:
         logger.error(f"Unexpected error fetching URL {request.url}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+
+
+@router.get("/{namespace}/{name}/identity-config", dependencies=[Depends(require_roles(ROLE_OPERATOR))])
+async def get_agent_identity_config(
+    namespace: str,
+    name: str,
+    kube: KubernetesService = Depends(get_kubernetes_service),
+) -> dict:
+    """
+    Fetch the AuthBridge configuration for an Agent.
+    """
+
+    # It would be better to check the workload for AuthBridge first, perhaps by
+    # checking for `kagenti.io/inject` label, or explicitly fetching sidecar.
+    # TODO define mechanism to used metadata rather than explicitly contacting instances
+
+    # Try to get Endpoint Slices
+    try:
+        endpoint_slices = kube.get_endpoint_slices(namespace=namespace, name=name)
+    except ApiException as e:
+        raise HTTPException(status_code=502, detail=str(e.reason))
+
+    for endpoint_slice in endpoint_slices.get("items", []):
+        for endpoint in endpoint_slice.get("endpoints", []):
+            for address in endpoint.get("addresses", []):
+                try:
+                    # AuthBridge serves config and status on port 9093
+                    url = f"http://{address}:9093/config"
+                    r = urlopen(url, timeout=10)
+                    data = json.loads(r.read())
+                    data["AuthBridge"] = True
+                    return data
+                except Exception as e:
+                    # Ignore exceptions -- it could mean a pod is not ready,
+                    # Check the next endpoint.
+                    pass
+
+    logger.info(f"Could not invoke any AuthBridge endpoints for {namespace}/{name}")
+    return {"AuthBridge": False}
+
+@router.get("/{namespace}/{name}/identity-status", dependencies=[Depends(require_roles(ROLE_OPERATOR))])
+async def get_agent_identity_status(
+    namespace: str,
+    name: str,
+    kube: KubernetesService = Depends(get_kubernetes_service),
+) -> dict:
+    """
+    Fetch the AuthBridge statistics and status for an Agent.
+    """
+
+    # Try to get Endpoint Slices for the Agent
+    try:
+        endpoint_slices = kube.get_endpoint_slices(namespace=namespace, name=name)
+    except ApiException as e:
+        raise HTTPException(status_code=502, detail=str(e.reason))
+
+    for endpoint_slice in endpoint_slices.get("items", []):
+        for endpoint in endpoint_slice.get("endpoints", []):
+            for address in endpoint.get("addresses", []):
+                try:
+                    # AuthBridge serves config and status on port 9093
+                    url = f"http://{address}:9093/stats"
+                    r = urlopen(url, timeout=10)
+                    data = json.loads(r.read())
+                    data["AuthBridge"] = True
+                    return data
+                except Exception as e:
+                    # Ignore exceptions -- it could mean a pod is not ready,
+                    # Check the next endpoint.
+                    pass
+
+    logger.info(f"Could not invoke any AuthBridge endpoints for {namespace}/{name}")
+    return {"AuthBridge": False}

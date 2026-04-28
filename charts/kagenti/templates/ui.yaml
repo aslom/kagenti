@@ -390,6 +390,9 @@ rules:
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["get", "list"]
+  - apiGroups: ["discovery.k8s.io/v1"]
+    resources: ["endpointslices"]
+    verbs: ["list"]
   {{- if .Values.featureFlags.sandbox }}
   # Sandbox-specific: create pods, exec, logs, and mutate configmaps/secrets/PVCs
   - apiGroups: [""]

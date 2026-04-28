@@ -51,6 +51,7 @@ class KubernetesService:
         self._batch_api: Optional[kubernetes.client.BatchV1Api] = None
         self._rbac_api: Optional[kubernetes.client.RbacAuthorizationV1Api] = None
         self._apis_api: Optional[kubernetes.client.ApisApi] = None
+        self._discovery_v1_api: Optional[kubernetes.client.DiscoveryApi] = None
 
     def _load_config(self) -> kubernetes.client.ApiClient:
         """Load Kubernetes configuration (in-cluster or kubeconfig)."""
@@ -109,6 +110,13 @@ class KubernetesService:
         if self._apis_api is None:
             self._apis_api = kubernetes.client.ApisApi(self.api_client)
         return self._apis_api
+
+    @property
+    def discovery_v1_api(self) -> kubernetes.client.DiscoveryApi:
+        """Get DiscoveryV1Api client for EndpointSlices"""
+        if self._discovery_v1_api is None:
+            self._discovery_v1_api = kubernetes.client.DiscoveryV1Api(self.api_client)
+        return self._discovery_v1_api
 
     def is_running_in_cluster(self) -> bool:
         """Check if running inside a Kubernetes cluster."""
@@ -493,6 +501,18 @@ class KubernetesService:
             return result.to_dict()
         except ApiException as e:
             logger.error(f"Error getting Service {name} in {namespace}: {e}")
+            raise
+
+    def get_endpoint_slices(self, namespace: str, name: str) -> dict:
+        """Get a EndpointSlices for a named Service."""
+        try:
+            result = self.discovery_v1_api.list_namespaced_endpoint_slice(
+                namespace=namespace,
+                label_selector=f"kubernetes.io/service-name={name}"
+            )
+            return result.to_dict()
+        except ApiException as e:
+            logger.error(f"Error getting EndpointSlices for Service {name} in {namespace}: {e}")
             raise
 
     def list_services(self, namespace: str, label_selector: Optional[str] = None) -> List[dict]:
