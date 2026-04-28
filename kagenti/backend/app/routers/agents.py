@@ -488,7 +488,7 @@ def _get_job_description(job: dict) -> str:
 
 
 def _is_sandbox_ready(sandbox: dict) -> str:
-    """Check if a Sandbox CR is ready by examining its status conditions."""
+    """Check if a Sandbox or SandboxClaim is ready by examining its status conditions."""
     status = sandbox.get("status", {})
     conditions = status.get("conditions", [])
     for cond in conditions:
@@ -500,7 +500,7 @@ def _is_sandbox_ready(sandbox: dict) -> str:
 
 
 def _get_sandbox_description(sandbox: dict) -> str:
-    """Extract description from a Sandbox CR."""
+    """Extract description from a Sandbox or SandboxClaim resource."""
     metadata = sandbox.get("metadata", {})
     annotations = metadata.get("annotations", {})
     return annotations.get(KAGENTI_DESCRIPTION_ANNOTATION, "No description")
