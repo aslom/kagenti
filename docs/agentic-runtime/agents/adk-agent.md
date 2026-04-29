@@ -4,10 +4,10 @@
 >
 > **Type:** Custom A2A
 > **Framework:** Google ADK + LiteLLM
-> **LLM:** LiteMaaS (llama-scout-17b)
-> **Supervisor:** No
-> **Sandbox Model:** Tier 3 (plain Deployment, no supervisor)
-> **Status:** Deployed, tested (Kind + HyperShift)
+> **LLM:** LiteMaaS (llama-scout-17b via LiteLLM proxy)
+> **Supervisor:** Yes (supervised variant: Landlock + seccomp + netns + OPA)
+> **Sandbox Model:** Tier 2 (Deployment with supervisor + port-bridge sidecar)
+> **Status:** Deployed as `adk-agent-supervised`, all skill tests pass
 
 ## 1. Overview
 

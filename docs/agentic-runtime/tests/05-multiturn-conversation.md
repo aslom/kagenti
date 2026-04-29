@@ -133,12 +133,12 @@ Tests use type-appropriate prompts for each agent:
 
 ```python
 AGENT_PROMPTS = {
-    "weather-agent": [
+    "weather-agent-supervised": [
         "What's the weather in Seattle?",
         "What about New York?",
         "And in Tokyo?",
     ],
-    "adk-agent": [
+    "adk-agent-supervised": [
         "Hello, who are you?",
         "What can you help with?",
         "Thank you!",

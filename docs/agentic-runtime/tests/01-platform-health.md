@@ -25,8 +25,8 @@ graph TB
 
     subgraph team1["team1"]
         AGT["Agent Deployments"]
-        AGT --> W["weather-agent"]
-        AGT --> A["adk-agent"]
+        AGT --> W["weather-agent-supervised"]
+        AGT --> A["adk-agent-supervised"]
         AGT --> C["claude-sdk-agent"]
         AGT --> S["weather-supervised"]
     end

@@ -7,7 +7,7 @@
 > **LLM:** None (pure tool-calling)
 > **Supervisor:** No
 > **Sandbox Model:** Tier 3 (plain Deployment, no supervisor)
-> **Status:** Deployed, tested (Kind + HyperShift)
+> **Status:** Removed (replaced by weather-agent-supervised). See [weather-supervised.md](weather-supervised.md). (Kind + HyperShift)
 
 ## 1. Overview
 

@@ -153,8 +153,8 @@ from injecting AuthBridge sidecars. This is correct for Phase 1 because:
 
 | Agent | AuthBridge | Supervisor | Why |
 |-------|-----------|-----------|-----|
-| weather-agent | **Injected** | No | Standard Kagenti agent (Tier 3) |
-| adk-agent | **Injected** | No | Standard Kagenti agent (Tier 3) |
+| weather-agent-supervised | **Injected** | No | Standard Kagenti agent (Tier 3) |
+| adk-agent-supervised | **Injected** | No | Standard Kagenti agent (Tier 3) |
 | claude-sdk-agent | **Injected** | No | Standard Kagenti agent (Tier 3) |
 | weather-supervised | **Disabled** | **Yes** | Supervisor's netns breaks AuthBridge |
 | openshell sandboxes | **Not present** | **Yes** | Gateway-managed, no webhook |

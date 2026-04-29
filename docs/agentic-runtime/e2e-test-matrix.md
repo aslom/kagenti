@@ -463,8 +463,8 @@ Non-supervised agents (Tier 3) have AuthBridge injected and working.
 
 | Agent | Tier | AuthBridge | Supervisor | Status |
 |-------|------|-----------|-----------|--------|
-| weather-agent | 3 | Injected | No | AuthBridge working |
-| adk-agent | 3 | Injected | No | AuthBridge working |
+| weather-agent-supervised | 2 | Injected | No | AuthBridge working |
+| adk-agent-supervised | 2 | Injected | No | AuthBridge working |
 | claude-sdk-agent | 3 | Injected | No | AuthBridge working |
 | weather-supervised | 2 | **Disabled** | Yes | `kagenti.io/inject: disabled` |
 | openshell sandboxes | 1 | Not present | Yes | Gateway-managed |
