@@ -36,11 +36,15 @@ router = APIRouter(prefix="/skills", tags=["skills"])
 
 
 class SkillLabels(BaseModel):
+    """Labels for categorizing skills."""
+
     category: Optional[str] = None
     type: Optional[str] = None
 
 
 class Skill(BaseModel):
+    """Represents a skill stored as a ConfigMap."""
+
     name: str
     namespace: str
     resourceName: str = ""
@@ -62,16 +66,22 @@ class SkillFile(BaseModel):
 
 
 class SkillDetail(Skill):
+    """Detailed skill information including files."""
+
     dataKeys: List[str] = []
     annotations: dict = {}
     files: List[SkillFile] = []
 
 
 class SkillListResponse(BaseModel):
+    """Response model for listing skills."""
+
     items: List[Skill]
 
 
 class CreateSkillRequest(BaseModel):
+    """Request model for creating a new skill."""
+
     name: str
     namespace: str
     description: Optional[str] = ""
@@ -81,6 +91,8 @@ class CreateSkillRequest(BaseModel):
 
 
 class CreateSkillResponse(BaseModel):
+    """Response model for skill creation."""
+
     success: bool
     name: str
     namespace: str
@@ -124,7 +136,7 @@ def _desanitize_configmap_key(key: str, file_paths_map: Optional[dict] = None) -
     # If we have the original path mapping, use it for perfect fidelity
     if file_paths_map and key in file_paths_map:
         return file_paths_map[key]
-    
+
     # Fallback heuristic for backward compatibility with existing ConfigMaps
     # that don't have the file-paths annotation
     parts = key.split(".")
@@ -272,24 +284,14 @@ async def list_skills(
     skills_with_content = []
     for cm in cms.items:
         data = cm.data or {}
-        annos = cm.metadata.annotations or {}
-        
-        # Load file paths mapping to find SKILL.md
-        file_paths_map = {}
-        file_paths_json = annos.get(SKILL_FILE_PATHS_ANNOTATION)
-        if file_paths_json:
-            try:
-                file_paths_map = json.loads(file_paths_json)
-            except Exception:
-                pass
-        
+
         # Try to get SKILL.md - check both original and sanitized keys
         content = data.get("SKILL.md", "")
         if not content:
             # Try sanitized key
             sanitized_key = _sanitize_configmap_key("SKILL.md")
             content = data.get(sanitized_key, "")
-        
+
         skills_with_content.append((_configmap_to_skill(cm), content))
 
     if q:
@@ -381,7 +383,7 @@ async def create_skill(
             raise HTTPException(
                 status_code=400, detail="SKILL.md is required in the files dictionary"
             )
-        
+
         # Store the file paths mapping in an annotation for perfect desanitization
         annotations[SKILL_FILE_PATHS_ANNOTATION] = json.dumps(file_paths_map)
     else:
