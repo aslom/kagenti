@@ -165,7 +165,9 @@ export const ImportAgentPage: React.FC = () => {
   const [showImportModal, setShowImportModal] = useState(false);
 
   // Workload type
-  const [workloadType, setWorkloadType] = useState<'deployment' | 'statefulset' | 'job' | 'sandbox'>('deployment');
+  const [workloadType, setWorkloadType] = useState<'deployment' | 'statefulset' | 'job' | 'sandbox'>(
+    features.agentSandbox ? 'sandbox' : 'deployment'
+  );
 
   // HTTPRoute/Route creation
   const [createHttpRoute, setCreateHttpRoute] = useState(false);
