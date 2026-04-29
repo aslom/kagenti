@@ -349,9 +349,9 @@ model validation.
 
 | Agent | Supervisor? | OPA Enforced? | Egress |
 |-------|------------|---------------|--------|
-| weather-agent | No | No | **Open** (plain K8s pod) |
+| weather-agent-supervised | Yes | Yes | Tier 2 |
 | weather-agent-supervised | **Yes** | **Yes** | Restricted to `*.svc.cluster.local` + LiteMaaS |
-| adk-agent | No | No (policy mounted but not enforced) | **Open** |
+| adk-agent-supervised | Yes | Yes (enforced) | Tier 2 |
 | claude-sdk-agent | No | No (policy mounted but not enforced) | **Open** |
 
 Non-supervised agents have OPA policy files mounted at `/etc/openshell/policy.yaml`

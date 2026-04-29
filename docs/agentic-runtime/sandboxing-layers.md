@@ -39,9 +39,9 @@ headers entirely and injects backend API keys from the gateway's credential stor
 
 | Agent | Supervisor? | OPA Enforced? | Egress |
 |-------|------------|---------------|--------|
-| weather-agent | No | No | **Open** (plain K8s pod) |
+| weather-agent-supervised | Yes | Yes | Tier 2 (supervisor + port bridge) |
 | weather-agent-supervised | **Yes** | **Yes** | Restricted to `*.svc.cluster.local` + LiteMaaS |
-| adk-agent | No | No (policy mounted but not enforced) | **Open** |
+| adk-agent-supervised | Yes | Yes (supervisor enforced) | Tier 2 |
 | claude-sdk-agent | No | No (policy mounted but not enforced) | **Open** |
 
 Non-supervised agents have OPA policy files mounted at `/etc/openshell/policy.yaml`

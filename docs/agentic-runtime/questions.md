@@ -18,7 +18,7 @@
 
 ### Q1.1: How do long-running A2A agents fit the OpenShell model?
 
-**Status:** OPEN (architecture decision — 3 deployment tiers)
+**Status:** ANSWERED — MVP design doc ([#1364](https://github.com/kagenti/kagenti/pull/1364)) defines 3 deployment tiers. PoC validated Tier 2 (supervised) and Tier 3 (plain). MVP adds gateway-per-tenant ([#1363](https://github.com/kagenti/kagenti/issues/1363)).
 
 The goal is to use OpenShell for ALL agents — not just interactive CLI sandboxes.
 Custom A2A agents (ADK, Claude SDK, LangGraph) should get the same security
@@ -78,7 +78,7 @@ The upgrade path to Tier 2/1 is additive — existing agents don't break.
 
 ### Q1.3: How does `openshell sandbox sessions` interact with Kagenti session management?
 
-**Status:** OPEN
+**Status:** PARTIALLY ANSWERED — MVP uses per-gateway SQLite (design doc §3.1). Session persistence via dtach ([#1354](https://github.com/kagenti/kagenti/issues/1354)). Full Kagenti backend integration is beyond-MVP (design doc §10).
 
 OpenShell gateway tracks sessions in its own DB (SQLite/Postgres). Kagenti backend
 has a separate session store in PostgreSQL. These are independent systems.
@@ -132,7 +132,7 @@ However, we use `privileged: true` SCC, not the reduced capability set.
 
 ### Q2.3: K8s Secrets (Kagenti) vs placeholder tokens (OpenShell)?
 
-**Status:** OPEN | **Related:** Q1.1 (3-tier model), Q8.1 (port bridge), Q8.3 (rearchitecture)
+**Status:** ANSWERED — MVP uses Keycloak credentials driver ([#1355](https://github.com/kagenti/kagenti/issues/1355)) for OAuth2 client_credentials. Static API keys via OpenShell native provider store. K8s Secrets remain for Tier 3 agents. | **Related:** Q1.1 (3-tier model), Q8.1 (port bridge), Q8.3 (rearchitecture)
 
 Two credential models exist:
 - **Kagenti:** API keys in K8s Secrets, injected via `secretKeyRef`

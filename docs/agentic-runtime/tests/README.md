@@ -21,7 +21,7 @@ This directory contains detailed documentation for each E2E test category. Each 
 | 09 | [HITL Policy](09-hitl-policy.md) | `test_09_hitl_policy.py` | 3 | 2 | 1 | OPA egress blocking |
 | 10 | [Workspace Persistence](10-workspace-persistence.md) | `test_10_workspace_persistence.py` | 8 | 7 | 1 | PVC data persistence |
 
-**Totals:** 103 tests, 83 passed, 20 skipped (Kind, fresh cluster)
+**Totals:** 136 tests, 102 passed (local Kind+LLM+NemoClaw), 34 skipped (Kind, fresh cluster)
 
 ## Agent Type Coverage
 
