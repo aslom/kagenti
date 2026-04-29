@@ -385,7 +385,7 @@ async def create_skill(
 @router.post(
     "/{namespace}/{name}/usage",
     response_model=Skill,
-    dependencies=[Depends(require_roles(ROLE_VIEWER))],
+    dependencies=[Depends(require_roles(ROLE_OPERATOR))],
 )
 async def increment_usage(
     namespace: str,
