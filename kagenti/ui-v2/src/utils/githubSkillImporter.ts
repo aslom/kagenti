@@ -137,34 +137,64 @@ function parseSkillMetadata(content: string): SkillMetadata {
 
 /**
  * Recursively fetch all files from a GitHub directory
+ *
+ * @param maxDepth Maximum recursion depth (default: 5)
+ * @param maxFiles Maximum number of files to fetch (default: 100)
  */
 async function fetchAllFiles(
   owner: string,
   repo: string,
   path: string,
   branch: string,
-  basePath: string = ''
+  basePath: string = '',
+  currentDepth: number = 0,
+  maxDepth: number = 5,
+  maxFiles: number = 100,
+  fileCount: { count: number } = { count: 0 }
 ): Promise<Array<{ path: string; content: string }>> {
   const files: Array<{ path: string; content: string }> = [];
+  
+  // Check depth limit
+  if (currentDepth >= maxDepth) {
+    console.warn(`Max depth ${maxDepth} reached at path: ${path}`);
+    return files;
+  }
+  
+  // Check file count limit
+  if (fileCount.count >= maxFiles) {
+    console.warn(`Max file count ${maxFiles} reached`);
+    return files;
+  }
   
   try {
     const contents = await fetchDirectoryContents(owner, repo, path, branch);
     
     for (const item of contents) {
+      // Check file count limit before processing each item
+      if (fileCount.count >= maxFiles) {
+        console.warn(`Max file count ${maxFiles} reached`);
+        break;
+      }
+      
       const relativePath = basePath ? `${basePath}/${item.name}` : item.name;
       
       if (item.type === 'file' && item.download_url) {
         // Fetch file content
         const content = await fetchFileContent(item.download_url);
         files.push({ path: relativePath, content });
+        fileCount.count++;
       } else if (item.type === 'dir') {
-        // Recursively fetch directory contents
+        // Recursively fetch directory contents with incremented depth
         const subFiles = await fetchAllFiles(
           owner,
           repo,
           item.path,
           branch,
-          relativePath
+          relativePath,
+          currentDepth + 1,
+          maxDepth,
+          maxFiles,
+          fileCount
         );
         files.push(...subFiles);
       }
