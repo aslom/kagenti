@@ -225,6 +225,8 @@ volumes:
 
 The supervisor starts as root, sets up Landlock, Seccomp, and network namespace isolation, then drops privileges before exec'ing the agent process.
 
+> **PodSecurity implication:** The sandbox pod's `runAsUser: 0` and `SYS_ADMIN`/`SYS_PTRACE`/`NET_ADMIN` capabilities require the agent namespace to use the `privileged` Pod Security Standard (or a namespace-scoped exemption policy). This is a deliberate tradeoff — the supervisor needs these privileges to establish kernel-level isolation (Landlock, seccomp, netns) before dropping to unprivileged execution. On OpenShift, this means the namespace needs a `privileged` SCC bound to the sandbox service account.
+
 ### 3.5 agent-sandbox-controller
 
 Upstream Kubernetes SIG controller (`registry.k8s.io/agent-sandbox/agent-sandbox-controller`). Reconciles `agents.x-k8s.io/v1alpha1/Sandbox` CRDs into pods and PVCs. Deployed once per cluster in `agent-sandbox-system`.
