@@ -11,6 +11,7 @@ featureFlags:
   integrations: false
   triggers: false
   agentSandbox: false
+  skills: false
 
 # ------------------------------------------------------------------
 #  Control Panel: Enable or disable components here

@@ -132,6 +132,8 @@ spec:
               value: "{{ .Values.featureFlags.triggers }}"
             - name: KAGENTI_FEATURE_FLAG_AGENT_SANDBOX
               value: "{{ .Values.featureFlags.agentSandbox }}"
+            - name: KAGENTI_FEATURE_FLAG_SKILLS
+              value: "{{ .Values.featureFlags.skills }}"
             - name: KEYCLOAK_URL
               value: {{ .Values.keycloak.url | quote }}
             - name: KEYCLOAK_PUBLIC_URL
