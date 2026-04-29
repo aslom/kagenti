@@ -39,7 +39,6 @@ from app.routers import (  # pylint: disable=wrong-import-position
     auth,
     chat,
     shipwright,
-    skills,
 )
 
 # Conditionally import feature-flagged modules.
@@ -85,6 +84,16 @@ if settings.kagenti_feature_flag_integrations:
     except ImportError:
         logging.getLogger(__name__).warning(
             "INTEGRATIONS flag enabled but integration modules not installed — skipping"
+        )
+_skills_modules_loaded = False
+if settings.kagenti_feature_flag_skills:
+    try:
+        from app.routers import skills  # noqa: E402
+
+        _skills_modules_loaded = True
+    except ImportError:
+        logging.getLogger(__name__).warning(
+            "SKILLS flag enabled but skills modules not installed — skipping"
         )
 # pylint: enable=wrong-import-position,no-name-in-module,import-error
 
@@ -166,7 +175,6 @@ app.include_router(auth.router, prefix="/api/v1")
 app.include_router(namespaces.router, prefix="/api/v1")
 app.include_router(agents.router, prefix="/api/v1")
 app.include_router(tools.router, prefix="/api/v1")
-app.include_router(skills.router, prefix="/api/v1")
 app.include_router(config.router, prefix="/api/v1")
 app.include_router(chat.router, prefix="/api/v1")
 app.include_router(shipwright.router, prefix="/api/v1")
@@ -192,6 +200,10 @@ if _triggers_modules_loaded:
 if _integrations_modules_loaded:
     app.include_router(integrations.router, prefix="/api/v1")
     logger.info("Feature flag INTEGRATIONS enabled — integration routes registered")
+
+if _skills_modules_loaded:
+    app.include_router(skills.router, prefix="/api/v1")
+    logger.info("Feature flag SKILLS enabled — skills routes registered")
 # pylint: enable=used-before-assignment
 
 

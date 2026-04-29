@@ -3,6 +3,7 @@
 
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useFeatureFlags } from '@/hooks/useFeatureFlags';
 import {
   PageSection,
   Title,
@@ -171,11 +172,14 @@ export const HomePage: React.FC = () => {
     enabled: namespaces.length > 0,
   });
 
-  // Fetch skills from first namespace
+  // Get feature flags
+  const features = useFeatureFlags();
+
+  // Fetch skills from first namespace (only if skills feature is enabled)
   const { data: skills = [], isLoading: skillsLoading } = useQuery({
     queryKey: ['skills', defaultNamespace],
     queryFn: () => skillService.list(defaultNamespace),
-    enabled: namespaces.length > 0,
+    enabled: namespaces.length > 0 && features.skills,
   });
 
   const readyAgents = agents.filter((a) => a.status === 'Ready').length;

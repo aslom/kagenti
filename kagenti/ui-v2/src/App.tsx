@@ -110,30 +110,34 @@ function App() {
             </ProtectedRoute>
           }
         />
-        <Route
-          path="/skills"
-          element={
-            <ProtectedRoute>
-              <SkillCatalogPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/skills/:namespace/:name"
-          element={
-            <ProtectedRoute>
-              <SkillDetailPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/skills/import"
-          element={
-            <ProtectedRoute>
-              <ImportSkillPage />
-            </ProtectedRoute>
-          }
-        />
+        {features.skills && (
+          <>
+            <Route
+              path="/skills"
+              element={
+                <ProtectedRoute>
+                  <SkillCatalogPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/skills/:namespace/:name"
+              element={
+                <ProtectedRoute>
+                  <SkillDetailPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/skills/import"
+              element={
+                <ProtectedRoute>
+                  <ImportSkillPage />
+                </ProtectedRoute>
+              }
+            />
+          </>
+        )}
         {features.integrations && (
           <>
             <Route path="/integrations" element={<ProtectedRoute><IntegrationsPage /></ProtectedRoute>} />

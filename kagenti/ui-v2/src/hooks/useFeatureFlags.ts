@@ -11,6 +11,7 @@ export interface FeatureFlags {
   triggers: boolean;
   /** agent-sandbox (kubernetes-sigs) as a fourth workload type. */
   agentSandbox: boolean;
+  skills: boolean;
 }
 
 const DEFAULT_FLAGS: FeatureFlags = {
@@ -18,6 +19,7 @@ const DEFAULT_FLAGS: FeatureFlags = {
   integrations: false,
   triggers: false,
   agentSandbox: false,
+  skills: false,
 };
 
 let cachedFlags: FeatureFlags | null = null;
@@ -40,6 +42,7 @@ export function useFeatureFlags(): FeatureFlags {
           integrations: data.integrations === true,
           triggers: data.triggers === true,
           agentSandbox: data.agentSandbox === true,
+          skills: data.skills === true,
         };
         cachedFlags = validated;
         setFlags(validated);
