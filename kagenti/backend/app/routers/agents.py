@@ -3959,7 +3959,7 @@ if settings.kagenti_feature_flag_authbridge_api:
         try:
             addresses = _get_service_endpoints(kube=kube, namespace=namespace, name=name)
         except ApiException as e:
-            raise HTTPException(status_code=502, detail=str(e.reason))
+            raise HTTPException(status_code=502, detail=e.reason)
 
         attempts = 0
         for address in addresses:
@@ -3971,13 +3971,14 @@ if settings.kagenti_feature_flag_authbridge_api:
                 data["AuthBridge"] = True
                 return data
             except Exception:
-                # It isn't an error for an enpoint to be unreachable, only for all pods to be unreachable
+                # It isn't an error for an endpoint to be unreachable, only for all pods to be unreachable
                 logger.info("Failed to talk to url %s; skipping", url, exc_info=True)
 
         if attempts == 0:
             raise HTTPException(status_code=404, detail=f"{name} not found")
 
         logger.info("Could not invoke any AuthBridge endpoints for %s/%s", namespace, name)
+        # We return HTTP 200 if no pods respond - this might be a valid agent w/o AuthBridge
         return {"AuthBridge": False}
 
     @router.get(
@@ -3998,7 +3999,7 @@ if settings.kagenti_feature_flag_authbridge_api:
         try:
             addresses = _get_service_endpoints(kube=kube, namespace=namespace, name=name)
         except ApiException as e:
-            raise HTTPException(status_code=502, detail=str(e.reason))
+            raise HTTPException(status_code=502, detail=e.reason)
 
         attempts = 0
         for address in addresses:
@@ -4010,13 +4011,14 @@ if settings.kagenti_feature_flag_authbridge_api:
                 data["AuthBridge"] = True
                 return data
             except Exception:
-                # It isn't an error for an enpoint to be unreachable, only for all pods to be unreachable
+                # It isn't an error for an endpoint to be unreachable, only for all pods to be unreachable
                 logger.info("Failed to talk to url %s; skipping", url, exc_info=True)
 
         if attempts == 0:
             raise HTTPException(status_code=404, detail=f"{name} not found")
 
         logger.info("Could not invoke any AuthBridge endpoints for %s/%s", namespace, name)
+        # We return HTTP 200 if no pods respond - this might be a valid agent w/o AuthBridge
         return {"AuthBridge": False}
 
 
