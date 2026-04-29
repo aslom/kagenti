@@ -5,6 +5,7 @@ import React from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { workloadTypeColor, WORKLOAD_META } from '@/utils/workloadType';
 import {
   PageSection,
   Title,
@@ -100,15 +101,6 @@ interface AgentCard {
   defaultInputModes?: string[];
   defaultOutputModes?: string[];
   skills?: AgentCardSkill[];
-}
-
-function workloadTypeColor(type: string): 'grey' | 'orange' | 'gold' | 'purple' {
-  switch (type) {
-    case 'sandbox': return 'purple';
-    case 'job': return 'orange';
-    case 'statefulset': return 'gold';
-    default: return 'grey';
-  }
 }
 
 export const AgentDetailPage: React.FC = () => {
@@ -998,8 +990,8 @@ export const AgentDetailPage: React.FC = () => {
                 >
                   {yaml.dump(
                     {
-                      apiVersion: agent.workloadType === 'sandbox' ? 'agents.x-k8s.io/v1alpha1' : agent.workloadType === 'statefulset' ? 'apps/v1' : agent.workloadType === 'job' ? 'batch/v1' : 'apps/v1',
-                      kind: agent.workloadType === 'sandbox' ? 'Sandbox' : agent.workloadType === 'statefulset' ? 'StatefulSet' : agent.workloadType === 'job' ? 'Job' : 'Deployment',
+                      apiVersion: (WORKLOAD_META[agent.workloadType ?? 'deployment'] ?? WORKLOAD_META.deployment).apiVersion,
+                      kind: (WORKLOAD_META[agent.workloadType ?? 'deployment'] ?? WORKLOAD_META.deployment).kind,
                       metadata: {
                         ...agent.metadata,
                         managedFields: undefined,

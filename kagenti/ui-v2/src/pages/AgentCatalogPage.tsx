@@ -3,6 +3,7 @@
 
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { workloadTypeColor } from '@/utils/workloadType';
 import {
   PageSection,
   Title,
@@ -121,15 +122,7 @@ export const AgentCatalogPage: React.FC = () => {
   const renderWorkloadType = (workloadType: string | undefined) => {
     const type = workloadType || 'deployment';
     const label = type.charAt(0).toUpperCase() + type.slice(1);
-    let color: 'grey' | 'orange' | 'gold' | 'purple' = 'grey';
-    if (type === 'job') {
-      color = 'orange';
-    } else if (type === 'statefulset') {
-      color = 'gold';
-    } else if (type === 'sandbox') {
-      color = 'purple';
-    }
-    return <Label color={color} isCompact>{label}</Label>;
+    return <Label color={workloadTypeColor(type)} isCompact>{label}</Label>;
   };
 
   const renderStatusBadge = (status: string) => {

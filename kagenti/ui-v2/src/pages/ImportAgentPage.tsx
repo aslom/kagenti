@@ -1004,10 +1004,10 @@ export const ImportAgentPage: React.FC = () => {
                   aria-label="Workload type selector"
                 >
                   {[
-                    { value: 'deployment', label: 'Deployment (Recommended)' },
+                    { value: 'deployment', label: features.agentSandbox ? 'Deployment' : 'Deployment (Recommended)' },
                     { value: 'statefulset', label: 'StatefulSet' },
                     { value: 'job', label: 'Job' },
-                    ...(features.agentSandbox ? [{ value: 'sandbox', label: 'Sandbox (agent-sandbox)' }] : []),
+                    ...(features.agentSandbox ? [{ value: 'sandbox', label: 'Sandbox (Recommended)' }] : []),
                   ].map((opt) => (
                     <FormSelectOption key={opt.value} value={opt.value} label={opt.label} />
                   ))}
