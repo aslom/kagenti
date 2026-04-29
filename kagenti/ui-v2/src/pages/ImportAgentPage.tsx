@@ -1,7 +1,7 @@
 // Copyright 2025 IBM Corp.
 // Licensed under the Apache License, Version 2.0
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { isValidEnvVarName, isValidContainerImage, isValidImageTag } from '../utils/validation';
 import { newRouteRowId } from '../utils/routeRowId';
@@ -168,6 +168,13 @@ export const ImportAgentPage: React.FC = () => {
   const [workloadType, setWorkloadType] = useState<'deployment' | 'statefulset' | 'job' | 'sandbox'>(
     features.agentSandbox ? 'sandbox' : 'deployment'
   );
+
+  // Sync default when feature flags load async (first page load before cache is warm)
+  useEffect(() => {
+    if (features.agentSandbox) {
+      setWorkloadType(prev => prev === 'deployment' ? 'sandbox' : prev);
+    }
+  }, [features.agentSandbox]);
 
   // HTTPRoute/Route creation
   const [createHttpRoute, setCreateHttpRoute] = useState(false);

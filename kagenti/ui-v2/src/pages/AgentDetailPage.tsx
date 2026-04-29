@@ -102,6 +102,15 @@ interface AgentCard {
   skills?: AgentCardSkill[];
 }
 
+function workloadTypeColor(type: string): 'grey' | 'orange' | 'gold' | 'purple' {
+  switch (type) {
+    case 'sandbox': return 'purple';
+    case 'job': return 'orange';
+    case 'statefulset': return 'gold';
+    default: return 'grey';
+  }
+}
+
 export const AgentDetailPage: React.FC = () => {
   const { namespace, name } = useParams<{ namespace: string; name: string }>();
   const navigate = useNavigate();
@@ -424,7 +433,7 @@ export const AgentDetailPage: React.FC = () => {
                       <DescriptionListGroup>
                         <DescriptionListTerm>Workload Type</DescriptionListTerm>
                         <DescriptionListDescription>
-                          <Label color={workloadType === 'sandbox' ? 'purple' : workloadType === 'job' ? 'orange' : workloadType === 'statefulset' ? 'gold' : 'grey'} isCompact>
+                          <Label color={workloadTypeColor(workloadType)} isCompact>
                             {workloadType.charAt(0).toUpperCase() + workloadType.slice(1)}
                           </Label>
                         </DescriptionListDescription>
