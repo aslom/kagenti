@@ -39,4 +39,5 @@ class TestSanitizeK8sName:
         assert _sanitize_k8s_name("---") == "skill"
         assert _sanitize_k8s_name("...") == "skill"
 
+
 # Made with Bob
