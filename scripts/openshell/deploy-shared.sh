@@ -266,14 +266,15 @@ if $STEP_KEYCLOAK; then
     KC_PASS=$(kubectl get secret keycloak-initial-admin -n "$KEYCLOAK_NS" \
       -o jsonpath='{.data.password}' | base64 -d)
 
+    # Pass commands via stdin (bash -s) to keep credentials out of process args
     kc_exec() {
-      kubectl exec -n "$KEYCLOAK_NS" "$KEYCLOAK_POD" -- bash -c "$1"
+      kubectl exec -i -n "$KEYCLOAK_NS" "$KEYCLOAK_POD" -- bash -s <<< "$1"
     }
 
     # Login to Keycloak
     log_info "Logging in to Keycloak as $KC_USER..."
     kc_exec "$KCADM config credentials --server http://localhost:8080 \
-      --realm master --user '$KC_USER' --password '$KC_PASS' \
+      --realm master --user $KC_USER --password $KC_PASS \
       --config $KC_CONFIG" >/dev/null 2>&1
 
     # 4a: Create realm
