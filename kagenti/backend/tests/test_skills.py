@@ -20,7 +20,7 @@ class TestSanitizeK8sName:
     def test_special_chars_conversion(self):
         """Test that spaces and special characters are converted to dashes."""
         assert _sanitize_k8s_name("My Skill Name") == "my-skill-name"
-        assert _sanitize_k8s_name("skill@#$%name") == "skill-----name"
+        assert _sanitize_k8s_name("skill@#$%name") == "skill----name"
 
     def test_valid_chars_preserved(self):
         """Test that dots and hyphens are preserved (valid in k8s names)."""
