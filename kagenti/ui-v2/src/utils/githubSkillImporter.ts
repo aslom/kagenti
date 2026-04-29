@@ -107,6 +107,24 @@ async function fetchDirectoryContents(
     throw new Error(`Failed to fetch directory: ${response.statusText}`);
   }
 
+  // Check rate limit headers
+  const remaining = response.headers.get('X-RateLimit-Remaining');
+  const limit = response.headers.get('X-RateLimit-Limit');
+  
+  if (remaining && limit) {
+    const remainingNum = parseInt(remaining, 10);
+    const limitNum = parseInt(limit, 10);
+    
+    // Warn when approaching rate limit (less than 20% remaining)
+    if (remainingNum < limitNum * 0.2) {
+      console.warn(
+        `GitHub API rate limit warning: ${remainingNum}/${limitNum} requests remaining. ` +
+        `Unauthenticated requests are limited to 60/hour. ` +
+        `Consider using a GitHub token for higher limits (5000/hour).`
+      );
+    }
+  }
+
   return response.json();
 }
 
@@ -209,12 +227,15 @@ async function fetchAllFiles(
 
 /**
  * Import skill data from a GitHub URL
- * 
+ *
  * This function:
  * 1. Parses the GitHub URL
  * 2. Fetches all files recursively from the specified path
  * 3. Looks for SKILL.md and extracts metadata
  * 4. Returns structured data ready for form population
+ *
+ * Note: Unauthenticated GitHub API requests are limited to 60/hour.
+ * Skills with many files may exhaust this limit quickly.
  */
 export async function importSkillFromGitHub(
   url: string
@@ -226,6 +247,11 @@ export async function importSkillFromGitHub(
   }
 
   const { owner, repo, branch, path } = urlParts;
+
+  console.info(
+    'Importing skill from GitHub. Note: Unauthenticated API requests are limited to 60/hour. ' +
+    'Large skills may require multiple requests.'
+  );
 
   // Fetch all files recursively
   const allFiles = await fetchAllFiles(owner, repo, path, branch);
