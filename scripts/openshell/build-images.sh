@@ -97,7 +97,7 @@ build_gateway() {
         return 1
     fi
     echo "Building gateway image: $GATEWAY_IMAGE:$TAG"
-    docker build -t "$GATEWAY_IMAGE:$TAG" \
+    docker build --load -t "$GATEWAY_IMAGE:$TAG" \
         --target gateway \
         -f "$src/deploy/docker/Dockerfile.images" \
         "$src"
@@ -111,7 +111,7 @@ build_compute_driver() {
         return 1
     fi
     echo "Building compute driver image: $COMPUTE_DRIVER_IMAGE:$TAG"
-    docker build -t "$COMPUTE_DRIVER_IMAGE:$TAG" \
+    docker build --load -t "$COMPUTE_DRIVER_IMAGE:$TAG" \
         -f "$src/deploy/Dockerfile" \
         "$src"
 }
@@ -124,7 +124,7 @@ build_credentials_driver() {
         return 1
     fi
     echo "Building credentials driver image: $CREDENTIALS_DRIVER_IMAGE:$TAG"
-    docker build -t "$CREDENTIALS_DRIVER_IMAGE:$TAG" \
+    docker build --load -t "$CREDENTIALS_DRIVER_IMAGE:$TAG" \
         -f "$src/deploy/Dockerfile" \
         "$src"
 }
