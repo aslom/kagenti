@@ -36,7 +36,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: openshell-kind-${{ github.head_ref || github.ref }}
+  group: openshell-kind-${{ github.event.issue.number || github.head_ref || github.ref }}
   cancel-in-progress: true
 
 permissions: {}
@@ -85,6 +85,16 @@ jobs:
               pull_number: context.issue.number
             });
             core.setOutput('sha', pr.head.sha);
+
+      - name: React with rocket
+        if: steps.check.outputs.has-permission == 'true' && github.event_name == 'issue_comment'
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea  # v7.0.1
+        with:
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner, repo: context.repo.repo,
+              comment_id: context.payload.comment.id, content: 'rocket'
+            });
 
   # ── E2E Test Job ───────────────────────────────────────────────
   e2e-openshell:
