@@ -168,6 +168,7 @@ SKILL_CATEGORY_LABEL = "kagenti.io/category"
 SKILL_DESCRIPTION_ANNOTATION = "kagenti.io/description"
 SKILL_ORIGIN_ANNOTATION = "kagenti.io/origin"
 SKILL_USAGE_ANNOTATION = "kagenti.io/usage-count"
+SKILL_FILE_PATHS_ANNOTATION = "kagenti.io/file-paths"
 SKILL_STATUS_READY = "Ready"
 # Environment variable name for the agent endpoint (the agent card URL for the agent)
 AGENT_ENDPOINT = "AGENT_ENDPOINT"

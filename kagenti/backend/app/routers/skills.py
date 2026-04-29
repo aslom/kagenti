@@ -24,6 +24,7 @@ from app.core.constants import (
     SKILL_DESCRIPTION_ANNOTATION,
     SKILL_ORIGIN_ANNOTATION,
     SKILL_USAGE_ANNOTATION,
+    SKILL_FILE_PATHS_ANNOTATION,
     SKILL_STATUS_READY,
     APP_KUBERNETES_IO_MANAGED_BY,
     APP_KUBERNETES_IO_NAME,
@@ -108,14 +109,24 @@ def _sanitize_configmap_key(key: str) -> str:
     return sanitized or "file"
 
 
-def _desanitize_configmap_key(key: str) -> str:
+def _desanitize_configmap_key(key: str, file_paths_map: Optional[dict] = None) -> str:
     """Convert a sanitized ConfigMap key back to its original file path.
 
-    This reverses the sanitization by converting dots back to forward slashes,
-    but only for path-like structures (not for file extensions).
+    Args:
+        key: The sanitized ConfigMap key
+        file_paths_map: Optional mapping of sanitized keys to original paths
+                       (from SKILL_FILE_PATHS_ANNOTATION)
+
+    Returns:
+        The original file path if found in file_paths_map, otherwise uses
+        a heuristic to convert dots back to slashes.
     """
-    # Simple heuristic: if there are multiple dots and no clear file extension pattern,
-    # convert dots to slashes. Otherwise, keep as-is.
+    # If we have the original path mapping, use it for perfect fidelity
+    if file_paths_map and key in file_paths_map:
+        return file_paths_map[key]
+    
+    # Fallback heuristic for backward compatibility with existing ConfigMaps
+    # that don't have the file-paths annotation
     parts = key.split(".")
     if len(parts) > 2:
         # Likely a path like "scripts.extract_form_structure.py"
@@ -166,11 +177,20 @@ def _configmap_to_skill_detail(cm) -> SkillDetail:
         usage_count = 0
     data = cm.data or {}
 
+    # Load file paths mapping from annotation if available
+    file_paths_map = {}
+    file_paths_json = annos.get(SKILL_FILE_PATHS_ANNOTATION)
+    if file_paths_json:
+        try:
+            file_paths_map = json.loads(file_paths_json)
+        except Exception:
+            pass  # Fall back to heuristic if annotation is malformed
+
     # Build files list from all data keys, desanitizing the paths
     files = []
     for sanitized_key, content in data.items():
         # Desanitize the key to get the original file path
-        file_path = _desanitize_configmap_key(sanitized_key)
+        file_path = _desanitize_configmap_key(sanitized_key, file_paths_map)
         files.append(
             SkillFile(
                 name=file_path.split("/")[-1],  # Extract filename from path
@@ -193,7 +213,7 @@ def _configmap_to_skill_detail(cm) -> SkillDetail:
         createdAt=(md.creation_timestamp.isoformat() if md.creation_timestamp else None),
         origin=annos.get(SKILL_ORIGIN_ANNOTATION),
         usageCount=usage_count,
-        dataKeys=sorted([_desanitize_configmap_key(k) for k in data.keys()]),
+        dataKeys=sorted([_desanitize_configmap_key(k, file_paths_map) for k in data.keys()]),
         annotations=dict(annos),
         files=sorted(files, key=lambda f: f.path),
     )
@@ -252,8 +272,24 @@ async def list_skills(
     skills_with_content = []
     for cm in cms.items:
         data = cm.data or {}
-        # Try to get SKILL.md with both original and sanitized key
-        content = data.get("SKILL.md", "") or data.get(_sanitize_configmap_key("SKILL.md"), "")
+        annos = cm.metadata.annotations or {}
+        
+        # Load file paths mapping to find SKILL.md
+        file_paths_map = {}
+        file_paths_json = annos.get(SKILL_FILE_PATHS_ANNOTATION)
+        if file_paths_json:
+            try:
+                file_paths_map = json.loads(file_paths_json)
+            except Exception:
+                pass
+        
+        # Try to get SKILL.md - check both original and sanitized keys
+        content = data.get("SKILL.md", "")
+        if not content:
+            # Try sanitized key
+            sanitized_key = _sanitize_configmap_key("SKILL.md")
+            content = data.get(sanitized_key, "")
+        
         skills_with_content.append((_configmap_to_skill(cm), content))
 
     if q:
@@ -331,18 +367,23 @@ async def create_skill(
         annotations[SKILL_ORIGIN_ANNOTATION] = request.url
 
     data = {}
+    file_paths_map = {}  # Map sanitized keys to original paths
 
     if request.files:
-        # Sanitize file paths for ConfigMap keys
+        # Sanitize file paths for ConfigMap keys and build mapping
         for file_path, content in request.files.items():
             sanitized_key = _sanitize_configmap_key(file_path)
             data[sanitized_key] = content
+            file_paths_map[sanitized_key] = file_path
 
         # Ensure SKILL.md exists (check both original and sanitized versions)
         if "SKILL.md" not in request.files and _sanitize_configmap_key("SKILL.md") not in data:
             raise HTTPException(
                 status_code=400, detail="SKILL.md is required in the files dictionary"
             )
+        
+        # Store the file paths mapping in an annotation for perfect desanitization
+        annotations[SKILL_FILE_PATHS_ANNOTATION] = json.dumps(file_paths_map)
     else:
         raise HTTPException(
             status_code=400, detail="'files' parameter is required with at least SKILL.md"
@@ -418,6 +459,16 @@ async def get_skill_file(
     """Get a specific file from a skill."""
     cm = _get_cm(kube, namespace, name)
     data = cm.data or {}
+    annos = cm.metadata.annotations or {}
+
+    # Load file paths mapping from annotation if available
+    file_paths_map = {}
+    file_paths_json = annos.get(SKILL_FILE_PATHS_ANNOTATION)
+    if file_paths_json:
+        try:
+            file_paths_map = json.loads(file_paths_json)
+        except Exception:
+            pass
 
     # Try to find the file by sanitized key
     sanitized_key = _sanitize_configmap_key(file_path)
@@ -428,9 +479,11 @@ async def get_skill_file(
         )
 
     content = data[sanitized_key]
+    # Use the mapping to get the original path if available
+    original_path = file_paths_map.get(sanitized_key, file_path)
     return SkillFile(
-        name=file_path.split("/")[-1],
-        path=file_path,
+        name=original_path.split("/")[-1],
+        path=original_path,
         content=content,
         size=len(content.encode("utf-8")),
     )
