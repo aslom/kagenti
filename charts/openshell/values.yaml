@@ -29,10 +29,8 @@ driver:
 
 # -- TLS configuration (cert-manager)
 tls:
-  # cert-manager issuer name that signs leaf certificates
+  # cert-manager ClusterIssuer that signs leaf certificates
   issuerRef: openshell-ca-issuer
-  # Issuer kind: ClusterIssuer (cluster-wide) or Issuer (namespace-scoped)
-  issuerKind: ClusterIssuer
   # Certificate duration
   duration: 8760h # one year
   # Renew before expiry
