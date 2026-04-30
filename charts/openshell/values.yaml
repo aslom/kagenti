@@ -22,6 +22,10 @@ oidc:
   audience: ""
   enabled: true
 
+# -- Keycloak ClusterIP for hostAliases (Kind only, set by deploy-tenant.sh)
+# Needed because localtest.me resolves to 127.0.0.1 inside the pod
+keycloakClusterIP: ""
+
 # -- Compute driver settings
 driver:
   # Target namespace for sandbox pods (defaults to .Values.tenant)

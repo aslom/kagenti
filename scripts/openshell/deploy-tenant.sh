@@ -111,17 +111,10 @@ get_keycloak_issuer() {
       return
     fi
   fi
-  # Find the Keycloak service with port 8080
-  kc_svc=$(kubectl get svc -n "$KEYCLOAK_NS" -l app=keycloak \
-    -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.ports[0].port}{"\n"}{end}' 2>/dev/null \
-    | awk '$2 == "8080" {print $1; exit}')
-  if [[ -z "$kc_svc" ]]; then
-    kc_svc=$(kubectl get svc -n "$KEYCLOAK_NS" -l app.kubernetes.io/name=keycloak \
-      -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.ports[0].port}{"\n"}{end}' 2>/dev/null \
-      | awk '$2 == "8080" {print $1; exit}')
-  fi
-  kc_svc="${kc_svc:-keycloak-service}"
-  echo "http://${kc_svc}.${KEYCLOAK_NS}.svc.cluster.local:8080/realms/openshell"
+  # Kind: Keycloak advertises http://keycloak.localtest.me:8080 as its issuer.
+  # The gateway must use this URL so issuer validation passes. We resolve
+  # in-cluster connectivity via hostAliases (see keycloakClusterIP helm value).
+  echo "http://keycloak.${KIND_DOMAIN}:8080/realms/openshell"
 }
 
 # ── Helper: generate ingress hostname ───────────────────────────────────────
@@ -151,6 +144,17 @@ RELEASE_NAME="${HELM_RELEASE_PREFIX}-${TENANT}"
 INGRESS_TYPE=$(get_ingress_type)
 INGRESS_HOST=$(get_ingress_host)
 OIDC_ISSUER=$(get_keycloak_issuer)
+
+# Kind: resolve Keycloak ClusterIP so we can inject hostAliases into the pod
+# (localtest.me resolves to 127.0.0.1 which is loopback inside the pod)
+KEYCLOAK_CLUSTER_IP=""
+if ! is_openshift; then
+  KEYCLOAK_CLUSTER_IP=$(kubectl get svc keycloak-service -n "$KEYCLOAK_NS" \
+    -o jsonpath='{.spec.clusterIP}' 2>/dev/null || echo "")
+  if [[ -n "$KEYCLOAK_CLUSTER_IP" ]]; then
+    EXTRA_HELM_SETS+=("keycloakClusterIP=$KEYCLOAK_CLUSTER_IP")
+  fi
+fi
 
 echo ""
 echo "╔════════════════════════════════════════════════════════════════╗"

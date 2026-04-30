@@ -155,7 +155,7 @@ if $STEP_GATEWAY_API; then
     log_success "Experimental Gateway API CRDs already installed — skipping"
   else
     log_info "Installing Gateway API ${GATEWAY_API_VERSION} (experimental bundle)..."
-    run_cmd kubectl apply -f \
+    run_cmd kubectl apply --server-side --force-conflicts -f \
       "https://github.com/kubernetes-sigs/gateway-api/releases/download/${GATEWAY_API_VERSION}/experimental-install.yaml"
 
     if ! $DRY_RUN; then
