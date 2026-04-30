@@ -38,12 +38,14 @@ tls:
 
 # -- Ingress configuration
 ingress:
-  # "istio" for Kind (TCPRoute) or "route" for OpenShift (passthrough Route)
+  # "istio" for Kind (TLSRoute via shared gateway) or "route" for OpenShift (passthrough Route)
   type: istio
-  # External hostname for the gateway
+  # External hostname for the gateway (used for SNI routing)
   host: ""
-  # Gateway port (Istio TCPRoute only)
-  port: 9443
+  # Shared Istio Gateway name (Kind only — must exist in gatewayNamespace)
+  gatewayName: tls-passthrough
+  # Namespace of the shared Istio Gateway
+  gatewayNamespace: kagenti-system
   # Route timeout (OpenShift only)
   timeout: 24h
 

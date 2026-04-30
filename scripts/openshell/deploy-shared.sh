@@ -171,6 +171,47 @@ if $STEP_GATEWAY_API; then
 fi
 
 # ============================================================================
+# Step 2b: Shared TLS passthrough Gateway (Kind only)
+# ============================================================================
+if $STEP_GATEWAY_API && ! is_openshift; then
+  log_info "Step 2b: Shared TLS passthrough Gateway (kagenti-system)"
+
+  if kubectl get gateway tls-passthrough -n kagenti-system &>/dev/null; then
+    log_success "Shared tls-passthrough Gateway already exists — skipping"
+  else
+    log_info "Creating shared TLS passthrough Gateway..."
+    run_cmd kubectl apply -f - <<'EOF'
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: tls-passthrough
+  namespace: kagenti-system
+  annotations:
+    networking.istio.io/service-type: NodePort
+spec:
+  gatewayClassName: istio
+  listeners:
+    - name: tls-passthrough
+      port: 443
+      protocol: TLS
+      tls:
+        mode: Passthrough
+      allowedRoutes:
+        namespaces:
+          from: All
+EOF
+
+    if ! $DRY_RUN; then
+      log_info "Waiting for Gateway to be programmed..."
+      kubectl wait --for=condition=Programmed gateway/tls-passthrough \
+        -n kagenti-system --timeout=60s
+    fi
+    log_success "Shared TLS passthrough Gateway created"
+  fi
+  echo ""
+fi
+
+# ============================================================================
 # Step 3: cert-manager CA chain
 # ============================================================================
 if $STEP_TLS; then

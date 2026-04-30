@@ -25,7 +25,7 @@ KEYCLOAK_NS="${KEYCLOAK_NS:-keycloak}"
 CHART_DIR="$REPO_ROOT/charts/openshell"
 HELM_RELEASE_PREFIX="openshell"
 KIND_DOMAIN="localtest.me"
-GATEWAY_PORT=9443
+KIND_TLS_NODEPORT=30443
 IMAGE_TAG="${OPENSHELL_IMAGE_TAG:-latest}"
 DRY_RUN=false
 TIMEOUT=120
@@ -203,7 +203,6 @@ HELM_ARGS=(
   --set "driver.namespace=$TENANT"
   --set "ingress.type=$INGRESS_TYPE"
   --set "ingress.host=$INGRESS_HOST"
-  --set "ingress.port=$GATEWAY_PORT"
   --set "images.gateway.tag=$IMAGE_TAG"
   --set "images.computeDriver.tag=$IMAGE_TAG"
   --set "images.credentialsDriver.tag=$IMAGE_TAG"
@@ -260,14 +259,14 @@ if ! $DRY_RUN; then
   echo "    kubectl get pods -n $TENANT"
   echo "    kubectl get certificate -n $TENANT"
   if [[ "$INGRESS_TYPE" == "istio" ]]; then
-    echo "    kubectl get gateway,tcproute -n $TENANT"
+    echo "    kubectl get tlsroute -n $TENANT"
   else
     echo "    kubectl get route -n $TENANT"
   fi
   echo ""
   echo "  Connect:"
   if [[ "$INGRESS_TYPE" == "istio" ]]; then
-    echo "    openshell gateway set --url https://${INGRESS_HOST}:${GATEWAY_PORT}"
+    echo "    openshell gateway set --url https://${INGRESS_HOST}:${KIND_TLS_NODEPORT}"
   else
     echo "    openshell gateway set --url https://${INGRESS_HOST}"
   fi
