@@ -11,7 +11,7 @@
 #   scripts/openshell/configure-cli.sh team1 --dry-run
 #   scripts/openshell/configure-cli.sh --help
 #
-# Prerequisites: kubectl, cert-manager installed, deploy-tenant.sh <team> run
+# Prerequisites: kubectl, cert-manager installed, deploy-shared.sh and deploy-tenant.sh run
 #
 # Note: The gateway server cert must include the external hostname as a SAN
 # for TLS hostname validation to succeed. See charts/openshell/ certificate
@@ -48,6 +48,7 @@ Options:
   --help               Show this help message
   --config-dir <dir>   openshell config directory (default: ~/.config/openshell)
   --dry-run            Print actions without writing files
+                       (note: platform detection still requires a live cluster context)
 
 After running this script:
   openshell status     # verify gateway connection
@@ -102,6 +103,10 @@ METADATA_FILE="$GATEWAY_DIR/metadata.json"
 
 if is_openshift; then
   BASE_DOMAIN=$(get_ocp_base_domain)
+  if [[ -z "$BASE_DOMAIN" ]]; then
+    log_error "Could not detect OCP base domain (kubectl get ingresses.config.openshift.io cluster)"
+    exit 1
+  fi
   GATEWAY_ENDPOINT="https://openshell-${TENANT}.${BASE_DOMAIN}"
   IS_REMOTE="true"
   PORT=443
@@ -127,23 +132,27 @@ echo ""
 # ── Step 1: Verify secret exists with all required keys ──────────────────────
 log_info "Step 1: Checking secret $SECRET_NAME in namespace $SECRET_NS"
 
-if ! kubectl get secret "$SECRET_NAME" -n "$SECRET_NS" &>/dev/null; then
-  log_error "Secret $SECRET_NAME not found in namespace $SECRET_NS"
-  log_error "Run 'scripts/openshell/deploy-tenant.sh $TENANT' first and wait for cert-manager."
-  exit 1
-fi
-
-for key in ca.crt tls.crt tls.key; do
-  val=$(kubectl get secret "$SECRET_NAME" -n "$SECRET_NS" \
-    --template="{{index .data \"$key\"}}" 2>/dev/null || true)
-  if [[ -z "$val" ]]; then
-    log_error "Key '$key' not found in secret $SECRET_NAME"
-    log_error "The certificate may still be issuing — wait and retry."
+if $DRY_RUN; then
+  log_warn "dry-run: skipping secret validation"
+else
+  if ! kubectl get secret "$SECRET_NAME" -n "$SECRET_NS" &>/dev/null; then
+    log_error "Secret $SECRET_NAME not found in namespace $SECRET_NS"
+    log_error "Run 'scripts/openshell/deploy-tenant.sh $TENANT' first and wait for cert-manager."
     exit 1
   fi
-done
 
-log_success "Secret $SECRET_NAME found with all required keys"
+  for key in ca.crt tls.crt tls.key; do
+    val=$(kubectl get secret "$SECRET_NAME" -n "$SECRET_NS" \
+      --template="{{index .data \"$key\"}}" 2>/dev/null || true)
+    if [[ -z "$val" ]]; then
+      log_error "Key '$key' not found in secret $SECRET_NAME"
+      log_error "The certificate may still be issuing — wait and retry."
+      exit 1
+    fi
+  done
+
+  log_success "Secret $SECRET_NAME found with all required keys"
+fi
 echo ""
 
 # ── Step 2: Create config directories ────────────────────────────────────────
