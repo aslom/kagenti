@@ -5,18 +5,18 @@ tenant: ""
 images:
   gateway:
     repository: ghcr.io/kagenti/openshell/gateway
-    tag: latest
+    tag: mvp-00a418f
     pullPolicy: IfNotPresent
   computeDriver:
     repository: ghcr.io/kagenti/openshell-driver-openshift/compute-driver
-    tag: latest
+    tag: mvp-8c86191
     pullPolicy: IfNotPresent
   credentialsDriver:
     repository: ghcr.io/kagenti/openshell-credentials-keycloak/credentials-driver
-    tag: latest
+    tag: main-d7d8306
     pullPolicy: IfNotPresent
 
-# -- OIDC configuration
+# -- OIDC configuration (issuer and audience are set per-tenant by deploy-tenant.sh)
 oidc:
   issuer: ""
   audience: ""
@@ -32,7 +32,7 @@ tls:
   # cert-manager ClusterIssuer that signs leaf certificates
   issuerRef: openshell-ca-issuer
   # Certificate duration
-  duration: 8760h
+  duration: 8760h # one year
   # Renew before expiry
   renewBefore: 720h
 
