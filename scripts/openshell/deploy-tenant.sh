@@ -29,6 +29,7 @@ GATEWAY_PORT=9443
 IMAGE_TAG="${OPENSHELL_IMAGE_TAG:-latest}"
 DRY_RUN=false
 TIMEOUT=120
+EXTRA_HELM_SETS=()  # Additional --set arguments
 
 # ── Colors & logging ────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
@@ -52,6 +53,7 @@ Options:
   --chart-dir <path>   Helm chart directory (default: $CHART_DIR)
   --keycloak-ns <ns>   Keycloak namespace (default: keycloak)
   --image-tag <tag>    Image tag for all containers (default: latest)
+  --set <key=val>      Extra helm --set values (repeatable)
   --timeout <secs>     Timeout for wait operations (default: 120)
 EOF
   exit 0
@@ -67,6 +69,7 @@ while [[ $# -gt 0 ]]; do
     --chart-dir)     CHART_DIR="$2"; shift 2 ;;
     --keycloak-ns)   KEYCLOAK_NS="$2"; shift 2 ;;
     --image-tag)     IMAGE_TAG="$2"; shift 2 ;;
+    --set)           EXTRA_HELM_SETS+=("$2"); shift 2 ;;
     --timeout)       TIMEOUT="$2"; shift 2 ;;
     -*)
       log_error "Unknown option: $1"
@@ -108,8 +111,16 @@ get_keycloak_issuer() {
       return
     fi
   fi
-  kc_svc=$(kubectl get svc -n "$KEYCLOAK_NS" -l app.kubernetes.io/name=keycloak \
-    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "keycloak")
+  # Find the Keycloak service with port 8080
+  kc_svc=$(kubectl get svc -n "$KEYCLOAK_NS" -l app=keycloak \
+    -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.ports[0].port}{"\n"}{end}' 2>/dev/null \
+    | awk '$2 == "8080" {print $1; exit}')
+  if [[ -z "$kc_svc" ]]; then
+    kc_svc=$(kubectl get svc -n "$KEYCLOAK_NS" -l app.kubernetes.io/name=keycloak \
+      -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.ports[0].port}{"\n"}{end}' 2>/dev/null \
+      | awk '$2 == "8080" {print $1; exit}')
+  fi
+  kc_svc="${kc_svc:-keycloak-service}"
   echo "http://${kc_svc}.${KEYCLOAK_NS}.svc.cluster.local:8080/realms/openshell"
 }
 
@@ -199,6 +210,10 @@ HELM_ARGS=(
   --wait
   --timeout "${TIMEOUT}s"
 )
+
+for extra in "${EXTRA_HELM_SETS[@]}"; do
+  HELM_ARGS+=(--set "$extra")
+done
 
 if $DRY_RUN; then
   echo "  [dry-run] helm ${HELM_ARGS[*]}"
