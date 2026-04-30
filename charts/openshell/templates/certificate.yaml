@@ -15,6 +15,9 @@ spec:
     - openshell-server.{{ .Values.tenant }}.svc
     - openshell-server.{{ .Values.tenant }}.svc.cluster.local
     - localhost
+    {{- if .Values.ingress.host }}
+    - {{ .Values.ingress.host }}
+    {{- end }}
   issuerRef:
     name: {{ .Values.tls.issuerRef }}
     kind: {{ .Values.tls.issuerKind }}
