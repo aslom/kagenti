@@ -3036,7 +3036,6 @@ async def create_agent(
                 sandbox_manifest = _build_sandbox_manifest(
                     request=request,
                     image=request.containerImage,
-                    shipwright_build_name=shipwright_build_name,
                 )
                 kube.create_sandbox(
                     namespace=request.namespace,
