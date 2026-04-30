@@ -10,7 +10,6 @@ The current Maintainers Group for the Kagenti Project consists of:
 | [Gloire Rubambiza](https://github.com/rubambiza) | IBM | Automation |
 | [Hai Huang](https://github.com/huang195) | IBM | MCP Gateway, Network Security, Agent Runtime, Intent Based Access Control, Authorization and Policy Management |
 | [Jarek Cwiklik](https://github.com/cwiklik) | IBM | Agent Lifecycle Management |
-| [Jenna Winkler](https://github.com/jenna-winkler) | IBM | Product Management |
 | [Kelly Abuelsaad](https://github.com/kellyaa) | IBM | Metrics and Measurements, Benchmarking, State Management |
 | [Ladislav Smola](https://github.com/Ladas) | Red Hat | Sandboxing, Automation |
 | [Maia Iyer](https://github.com/maia-iyer) | IBM | Workload Identity and Security, State Management |
