@@ -63,7 +63,7 @@ TEKTON_VERSION="v0.66.0"
 SHIPWRIGHT_VERSION="v0.14.0"
 MCP_GATEWAY_VERSION="0.6.0"
 KUADRANT_VERSION="1.4.2"
-AGENT_SANDBOX_VERSION="v0.3.10"
+AGENT_SANDBOX_VERSION="v0.4.3"
 
 # ── Colors & logging ────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
