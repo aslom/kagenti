@@ -1,0 +1,79 @@
+# -- Tenant name (used as namespace and audience)
+tenant: ""
+
+# -- Container images
+images:
+  gateway:
+    repository: ghcr.io/kagenti/openshell/gateway
+    tag: latest
+    pullPolicy: IfNotPresent
+  computeDriver:
+    repository: ghcr.io/kagenti/openshell-driver-openshift/compute-driver
+    tag: latest
+    pullPolicy: IfNotPresent
+  credentialsDriver:
+    repository: ghcr.io/kagenti/openshell-credentials-keycloak/credentials-driver
+    tag: latest
+    pullPolicy: IfNotPresent
+
+# -- OIDC configuration
+oidc:
+  issuer: ""
+  audience: ""
+  enabled: true
+
+# -- Compute driver settings
+driver:
+  # Target namespace for sandbox pods (defaults to .Values.tenant)
+  namespace: ""
+
+# -- TLS configuration (cert-manager)
+tls:
+  # cert-manager ClusterIssuer that signs leaf certificates
+  issuerRef: openshell-ca-issuer
+  # Certificate duration
+  duration: 8760h
+  # Renew before expiry
+  renewBefore: 720h
+
+# -- Ingress configuration
+ingress:
+  # "istio" for Kind (TCPRoute) or "route" for OpenShift (passthrough Route)
+  type: istio
+  # External hostname for the gateway
+  host: ""
+  # Gateway port (Istio TCPRoute only)
+  port: 9443
+  # Route timeout (OpenShift only)
+  timeout: 24h
+
+# -- Resource quota for sandbox pods
+quota:
+  pods: "10"
+  requestsCpu: "20"
+  requestsMemory: "40Gi"
+  pvcs: "10"
+
+# -- Gateway resources
+resources:
+  gateway:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  computeDriver:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  credentialsDriver:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi

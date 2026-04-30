@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: openshell-server
+  namespace: {{ .Values.tenant }}
+  labels:
+    {{- include "openshell.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+spec:
+  serviceName: openshell-server
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "openshell.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: gateway
+  template:
+    metadata:
+      labels:
+        {{- include "openshell.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: gateway
+        openshell.ai/tenant: {{ .Values.tenant }}
+    spec:
+      serviceAccountName: openshell-gateway
+      containers:
+        - name: gateway
+          image: "{{ .Values.images.gateway.repository }}:{{ .Values.images.gateway.tag }}"
+          imagePullPolicy: {{ .Values.images.gateway.pullPolicy }}
+          ports:
+            - name: grpc
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: OPENSHELL_OIDC_ISSUER
+              value: {{ .Values.oidc.issuer | quote }}
+            - name: OPENSHELL_OIDC_AUDIENCE
+              value: {{ include "openshell.oidcAudience" . | quote }}
+            - name: OPENSHELL_OIDC_ENABLED
+              value: {{ .Values.oidc.enabled | quote }}
+            - name: OPENSHELL_DB_URL
+              value: "sqlite:///data/openshell.db"
+            - name: OPENSHELL_COMPUTE_DRIVER_SOCKET
+              value: "/run/drivers/compute.sock"
+            - name: OPENSHELL_CREDENTIALS_DRIVER_SOCKET
+              value: "/run/drivers/credentials.sock"
+          volumeMounts:
+            - name: driver-sockets
+              mountPath: /run/drivers
+            - name: data
+              mountPath: /data
+            - name: server-tls
+              mountPath: /tls/server
+              readOnly: true
+          resources:
+            {{- toYaml .Values.resources.gateway | nindent 12 }}
+        - name: compute-driver
+          image: "{{ .Values.images.computeDriver.repository }}:{{ .Values.images.computeDriver.tag }}"
+          imagePullPolicy: {{ .Values.images.computeDriver.pullPolicy }}
+          args:
+            - "--socket=/run/drivers/compute.sock"
+            - "--namespace={{ include "openshell.driverNamespace" . }}"
+          volumeMounts:
+            - name: driver-sockets
+              mountPath: /run/drivers
+          resources:
+            {{- toYaml .Values.resources.computeDriver | nindent 12 }}
+        - name: credentials-driver
+          image: "{{ .Values.images.credentialsDriver.repository }}:{{ .Values.images.credentialsDriver.tag }}"
+          imagePullPolicy: {{ .Values.images.credentialsDriver.pullPolicy }}
+          args:
+            - "--socket=/run/drivers/credentials.sock"
+          volumeMounts:
+            - name: driver-sockets
+              mountPath: /run/drivers
+          resources:
+            {{- toYaml .Values.resources.credentialsDriver | nindent 12 }}
+      volumes:
+        - name: driver-sockets
+          emptyDir: {}
+        - name: server-tls
+          secret:
+            secretName: openshell-server-tls
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
