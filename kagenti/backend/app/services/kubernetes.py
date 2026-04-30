@@ -19,11 +19,7 @@ from kubernetes.config import ConfigException
 from app.core.constants import (
     AGENT_SANDBOX_CRD_GROUP,
     AGENT_SANDBOX_CRD_VERSION,
-    AGENT_SANDBOX_CLAIM_PLURAL,
-    AGENT_SANDBOX_EXT_GROUP,
-    AGENT_SANDBOX_EXT_VERSION,
     AGENT_SANDBOX_PLURAL,
-    AGENT_SANDBOX_TEMPLATE_PLURAL,
     ENABLED_NAMESPACE_LABEL_KEY,
     ENABLED_NAMESPACE_LABEL_VALUE,
 )
@@ -790,86 +786,6 @@ class KubernetesService:
             AGENT_SANDBOX_PLURAL,
             name,
             body,
-        )
-
-    # -------------------------------------------------------------------------
-    # SandboxTemplate Operations (extensions.agents.x-k8s.io)
-    # -------------------------------------------------------------------------
-
-    def create_sandbox_template(self, namespace: str, body: dict) -> dict:
-        """Create a SandboxTemplate custom resource."""
-        return self.create_custom_resource(
-            AGENT_SANDBOX_EXT_GROUP,
-            AGENT_SANDBOX_EXT_VERSION,
-            namespace,
-            AGENT_SANDBOX_TEMPLATE_PLURAL,
-            body,
-        )
-
-    def get_sandbox_template(self, namespace: str, name: str) -> dict:
-        """Get a SandboxTemplate custom resource by name."""
-        return self.get_custom_resource(
-            AGENT_SANDBOX_EXT_GROUP,
-            AGENT_SANDBOX_EXT_VERSION,
-            namespace,
-            AGENT_SANDBOX_TEMPLATE_PLURAL,
-            name,
-        )
-
-    def delete_sandbox_template(self, namespace: str, name: str) -> None:
-        """Delete a SandboxTemplate custom resource by name."""
-        self.delete_custom_resource(
-            AGENT_SANDBOX_EXT_GROUP,
-            AGENT_SANDBOX_EXT_VERSION,
-            namespace,
-            AGENT_SANDBOX_TEMPLATE_PLURAL,
-            name,
-        )
-
-    # -------------------------------------------------------------------------
-    # SandboxClaim Operations (extensions.agents.x-k8s.io)
-    # -------------------------------------------------------------------------
-
-    def create_sandbox_claim(self, namespace: str, body: dict) -> dict:
-        """Create a SandboxClaim custom resource."""
-        return self.create_custom_resource(
-            AGENT_SANDBOX_EXT_GROUP,
-            AGENT_SANDBOX_EXT_VERSION,
-            namespace,
-            AGENT_SANDBOX_CLAIM_PLURAL,
-            body,
-        )
-
-    def get_sandbox_claim(self, namespace: str, name: str) -> dict:
-        """Get a SandboxClaim custom resource by name."""
-        return self.get_custom_resource(
-            AGENT_SANDBOX_EXT_GROUP,
-            AGENT_SANDBOX_EXT_VERSION,
-            namespace,
-            AGENT_SANDBOX_CLAIM_PLURAL,
-            name,
-        )
-
-    def list_sandbox_claims(
-        self, namespace: str, label_selector: Optional[str] = None
-    ) -> List[dict]:
-        """List SandboxClaim custom resources in a namespace."""
-        return self.list_custom_resources(
-            AGENT_SANDBOX_EXT_GROUP,
-            AGENT_SANDBOX_EXT_VERSION,
-            namespace,
-            AGENT_SANDBOX_CLAIM_PLURAL,
-            label_selector,
-        )
-
-    def delete_sandbox_claim(self, namespace: str, name: str) -> None:
-        """Delete a SandboxClaim custom resource by name."""
-        self.delete_custom_resource(
-            AGENT_SANDBOX_EXT_GROUP,
-            AGENT_SANDBOX_EXT_VERSION,
-            namespace,
-            AGENT_SANDBOX_CLAIM_PLURAL,
-            name,
         )
 
 

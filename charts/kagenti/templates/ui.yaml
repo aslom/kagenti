@@ -444,13 +444,10 @@ rules:
     resources: ["routes"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   {{- if .Values.featureFlags.agentSandbox }}
-  # agent-sandbox (kubernetes-sigs) — read Sandboxes, manage Templates + Claims
+  # agent-sandbox (kubernetes-sigs) — direct Sandbox management
   - apiGroups: ["agents.x-k8s.io"]
     resources: ["sandboxes"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: ["extensions.agents.x-k8s.io"]
-    resources: ["sandboxtemplates", "sandboxclaims"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+    verbs: ["get", "list", "watch", "create", "delete"]
   {{- end }}
   {{- if .Values.featureFlags.integrations }}
   # Integration CRDs for repository integrations
