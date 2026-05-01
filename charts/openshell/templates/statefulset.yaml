@@ -94,7 +94,10 @@ spec:
             - "--socket=/run/drivers/compute.sock"
             - "--namespace={{ include "openshell.driverNamespace" . }}"
             - "--supervisor-image={{ .Values.supervisorImage.repository }}:{{ .Values.supervisorImage.tag }}"
+            - "--gateway-endpoint=https://openshell-server.{{ .Values.tenant }}.svc:8080"
             - "--dtach-binary-path=/usr/local/bin/openshell-sandbox"
+            - "--tls-ca-secret=openshell-server-tls"
+            - "--tls-client-secret=openshell-client-tls"
           volumeMounts:
             - name: driver-sockets
               mountPath: /run/drivers
