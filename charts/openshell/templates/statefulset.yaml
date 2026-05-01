@@ -67,6 +67,8 @@ spec:
               value: {{ .Values.oidc.enabled | quote }}
             - name: OPENSHELL_DB_URL
               value: "sqlite:///data/openshell.db"
+            - name: OPENSHELL_DRIVERS
+              value: "external"
             - name: OPENSHELL_COMPUTE_DRIVER_SOCKET
               value: "/run/drivers/compute.sock"
             - name: OPENSHELL_CREDENTIALS_DRIVER_SOCKET
@@ -91,6 +93,7 @@ spec:
           args:
             - "--socket=/run/drivers/compute.sock"
             - "--namespace={{ include "openshell.driverNamespace" . }}"
+            - "--dtach-binary-path=/usr/local/bin/openshell-sandbox"
           volumeMounts:
             - name: driver-sockets
               mountPath: /run/drivers
