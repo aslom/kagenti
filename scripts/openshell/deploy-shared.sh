@@ -329,7 +329,7 @@ if $STEP_KEYCLOAK; then
       -s clientId=openshell-cli \
       -s enabled=true \
       -s publicClient=true \
-      -s 'redirectUris=[\"http://localhost:*\"]' \
+      -s 'redirectUris=[\"http://localhost:*\",\"http://127.0.0.1:*\"]' \
       -s 'webOrigins=[\"+\"]' \
       -s directAccessGrantsEnabled=true \
       -s 'attributes={\"pkce.code.challenge.method\":\"S256\"}' \
@@ -373,12 +373,12 @@ if $STEP_KEYCLOAK; then
         local grp_id
         grp_id=$(kc_exec "$KCADM get groups --config $KC_CONFIG -r openshell \
           --fields id,name 2>/dev/null" | \
-          python3 -c "import sys,json; gs=json.load(sys.stdin); print(next((g['id'] for g in gs if g['name']=='$grp'),''))" 2>/dev/null || echo "")
+          grep -B1 "\"$grp\"" | grep '"id"' | sed 's/.*: "\(.*\)".*/\1/')
         if [[ -n "$grp_id" ]]; then
           local user_id
           user_id=$(kc_exec "$KCADM get users --config $KC_CONFIG -r openshell \
             -q username=$username --fields id 2>/dev/null" | \
-            python3 -c "import sys,json; print(json.load(sys.stdin)[0]['id'])" 2>/dev/null || echo "")
+            grep '"id"' | head -1 | sed 's/.*: "\(.*\)".*/\1/')
           if [[ -n "$user_id" ]]; then
             kc_exec "$KCADM update users/$user_id/groups/$grp_id --config $KC_CONFIG \
               -r openshell -s realm=openshell -s userId=$user_id -s groupId=$grp_id \
@@ -394,11 +394,11 @@ if $STEP_KEYCLOAK; then
     create_openshell_user "admin" "admin123" "openshell-admin" "team1" "team2"
 
     # 4f: Create per-tenant client scopes with audience mappers
-    # Each tenant gets an optional client scope. The CLI requests the appropriate
-    # scope (e.g. --scope team1-audience) to get an audience-scoped token.
+    # Each tenant gets a default client scope so the audience claim is always
+    # present in tokens (the CLI does not request scopes explicitly).
     CLIENT_ID=$(kc_exec "$KCADM get clients --config $KC_CONFIG -r openshell \
       -q clientId=openshell-cli --fields id 2>/dev/null" | \
-      python3 -c "import sys,json; print(json.load(sys.stdin)[0]['id'])" 2>/dev/null || echo "")
+      grep '"id"' | head -1 | sed 's/.*: "\(.*\)".*/\1/')
 
     for tenant in team1 team2; do
       log_info "Creating client scope: ${tenant}-audience"
@@ -410,7 +410,7 @@ if $STEP_KEYCLOAK; then
       # Get the scope ID to add the audience mapper
       SCOPE_ID=$(kc_exec "$KCADM get client-scopes --config $KC_CONFIG -r openshell \
         --fields id,name 2>/dev/null" | \
-        python3 -c "import sys,json; ss=json.load(sys.stdin); print(next((s['id'] for s in ss if s['name']=='${tenant}-audience'),''))" 2>/dev/null || echo "")
+        grep -B1 "\"${tenant}-audience\"" | grep '"id"' | sed 's/.*: "\(.*\)".*/\1/')
 
       if [[ -n "$SCOPE_ID" ]]; then
         log_info "Adding audience mapper to ${tenant}-audience scope"
@@ -422,9 +422,9 @@ if $STEP_KEYCLOAK; then
           -s 'config={\"included.custom.audience\":\"${tenant}\",\"id.token.claim\":\"true\",\"access.token.claim\":\"true\"}' \
           2>/dev/null" 2>/dev/null || true
 
-        # Assign as optional scope to openshell-cli client
+        # Assign as default scope so audience is always in the token
         if [[ -n "$CLIENT_ID" ]]; then
-          kc_exec "$KCADM update clients/$CLIENT_ID/optional-client-scopes/$SCOPE_ID \
+          kc_exec "$KCADM update clients/$CLIENT_ID/default-client-scopes/$SCOPE_ID \
             --config $KC_CONFIG -r openshell 2>/dev/null" 2>/dev/null || true
         fi
       fi
