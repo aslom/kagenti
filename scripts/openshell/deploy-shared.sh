@@ -212,6 +212,29 @@ EOF
 fi
 
 # ============================================================================
+# Step 2c: Enable alpha Gateway API support in Istio (Kind only)
+# ============================================================================
+if $STEP_GATEWAY_API && ! is_openshift; then
+  log_info "Step 2c: Enabling PILOT_ENABLE_ALPHA_GATEWAY_API on istiod"
+
+  CURRENT_VAL=$(kubectl get deployment istiod -n istio-system \
+    -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="PILOT_ENABLE_ALPHA_GATEWAY_API")].value}' 2>/dev/null || echo "")
+
+  if [[ "$CURRENT_VAL" == "true" ]]; then
+    log_success "PILOT_ENABLE_ALPHA_GATEWAY_API already enabled — skipping"
+  else
+    run_cmd kubectl set env deployment/istiod -n istio-system \
+      PILOT_ENABLE_ALPHA_GATEWAY_API=true
+
+    if ! $DRY_RUN; then
+      kubectl rollout status deployment/istiod -n istio-system --timeout=60s
+    fi
+    log_success "Istio alpha Gateway API support enabled"
+  fi
+  echo ""
+fi
+
+# ============================================================================
 # Step 3: cert-manager CA chain
 # ============================================================================
 if $STEP_TLS; then
