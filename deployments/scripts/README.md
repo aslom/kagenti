@@ -74,8 +74,7 @@ You can proceed with Kagenti installation.
 
 Next steps:
   1. Review any warnings above
-  2. Run the Ansible installer: deployments/ansible/run-install.sh --env ocp
-  3. Or install manually with Helm (see docs/ocp/openshift-install.md)
+  2. Run the installer: scripts/ocp/setup-kagenti.sh
 ```
 
 **When to run:**
@@ -122,5 +121,6 @@ However, running the pre-flight check script first is recommended to catch issue
 ## See Also
 
 - [OpenShift Installation Guide](../../docs/ocp/openshift-install.md)
+- [Kagenti Installation Guide](../../docs/install.md)
 - [Ansible Installer README](../ansible/README.md)
-- [Version Compatibility Matrix](../../docs/ocp/openshift-install.md#critical-version-requirements)
+- [Version Compatibility Matrix](../../docs/ocp/openshift-install.md#openshift-version-compatibility)

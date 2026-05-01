@@ -40,7 +40,7 @@ kagenti/
 | Task | Command |
 |------|---------|
 | Deploy to Kind | `./.github/scripts/local-setup/kind-full-test.sh --skip-cluster-destroy` |
-| Deploy to OpenShift | `./deployments/ansible/run-install.sh --env ocp` |
+| Deploy to OpenShift | `./scripts/ocp/setup-kagenti.sh` |
 | Run E2E tests | `uv run pytest kagenti/tests/e2e/ -v` |
 | Run linter | `make lint` |
 | Pre-commit | `pre-commit run --all-files` |
