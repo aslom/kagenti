@@ -142,10 +142,12 @@ ADD_ARGS=(
 if $DRY_RUN; then
   echo "  [dry-run] openshell ${ADD_ARGS[*]}"
 else
-  openshell "${ADD_ARGS[@]}" && log_success "Gateway registered" || {
-    log_warn "Gateway may already exist — trying select instead"
-    openshell gateway select "$GATEWAY_NAME" 2>/dev/null || true
-  }
+  if openshell gateway info --gateway "$GATEWAY_NAME" &>/dev/null; then
+    log_warn "Gateway $GATEWAY_NAME already exists — removing to re-register"
+    openshell gateway destroy --name "$GATEWAY_NAME" 2>/dev/null || true
+  fi
+  openshell "${ADD_ARGS[@]}"
+  log_success "Gateway registered"
 fi
 echo ""
 
