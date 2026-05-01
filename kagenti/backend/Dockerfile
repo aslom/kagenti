@@ -2,7 +2,7 @@
 # Licensed under the Apache License, Version 2.0
 
 # Stage 1: Build stage with uv
-FROM python:3.14-slim AS builder
+FROM python:3.14-slim@sha256:5b3879b6f3cb77e712644d50262d05a7c146b7312d784a18eff7ff5462e77033 AS builder
 
 WORKDIR /app
 
@@ -19,7 +19,7 @@ RUN uv venv /app/.venv && \
     uv pip install --no-cache -r pyproject.toml
 
 # Stage 2: Runtime stage
-FROM python:3.14-slim
+FROM python:3.14-slim@sha256:5b3879b6f3cb77e712644d50262d05a7c146b7312d784a18eff7ff5462e77033
 
 WORKDIR /app
 
