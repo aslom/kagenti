@@ -397,6 +397,7 @@ for ns in v.get('agentNamespaces', ['team1', 'team2']):
 log_info "Step 2.5: MLflow DSC preflight + provisioning"
 if ! $KUBECTL get crd datascienceclusters.datasciencecluster.opendatahub.io &>/dev/null; then
   log_warn "RHOAI not installed (DataScienceCluster CRD not found) — skipping MLflow provisioning"
+  SKIP_MLFLOW=true
 else
   _mlflow_check_dsc
   _mlflow_create_cr
