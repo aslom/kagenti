@@ -838,8 +838,9 @@
 
 #
 # SPIFFE IdP setup job - creates Keycloak SPIFFE identity provider
-# Note: The SPIRE chart (v0.28.4+) now supports setKeyUse configuration natively,
-# so no ConfigMap patching is needed. The set_key_use: true config is set via Helm values.
+# Note: SPIRE chart v0.27.0 does NOT template config.set_key_use into the ConfigMap
+# despite accepting it as a Helm value. We patch the ConfigMap directly before
+# creating the job.
 - name: Run SPIFFE IdP setup job
   block:
     - name: Get kagenti-deps release values
@@ -980,6 +981,32 @@
             kind: Role
             name: kagenti-spiffe-idp-pod-reader
             apiGroup: rbac.authorization.k8s.io
+
+    - name: Patch SPIRE OIDC ConfigMap to add set_key_use
+      shell: |
+        NS="{{ charts.spire.server_namespace }}"
+        CM="spire-spiffe-oidc-discovery-provider"
+        CONF=$(kubectl get configmap "$CM" -n "$NS" -o jsonpath='{.data.oidc-discovery-provider\.conf}' 2>/dev/null)
+        if [ -z "$CONF" ]; then
+          echo "ConfigMap not found, skipping"
+          exit 0
+        fi
+        HAS_KEY=$(echo "$CONF" | python3 -c "import sys,json; d=json.load(sys.stdin); print('yes' if d.get('set_key_use') else 'no')" 2>/dev/null || echo "no")
+        if [ "$HAS_KEY" = "yes" ]; then
+          echo "set_key_use already present"
+          exit 0
+        fi
+        PATCHED=$(echo "$CONF" | python3 -c "import sys,json; d=json.load(sys.stdin); d['set_key_use']=True; json.dump(d,sys.stdout)")
+        kubectl get configmap "$CM" -n "$NS" -o json | \
+          python3 -c "import sys,json; cm=json.load(sys.stdin); cm['data']['oidc-discovery-provider.conf']=r'''$PATCHED'''; json.dump(cm,sys.stdout)" | \
+          kubectl replace -f -
+        kubectl rollout restart deployment/spire-spiffe-oidc-discovery-provider -n "$NS"
+        kubectl rollout status deployment/spire-spiffe-oidc-discovery-provider -n "$NS" --timeout=120s
+        echo "OIDC ConfigMap patched with set_key_use: true"
+      args:
+        executable: /bin/bash
+      changed_when: "'patched' in patch_oidc_result.stdout"
+      register: patch_oidc_result
 
     - name: Delete existing SPIFFE IdP setup job if it exists
       kubernetes.core.k8s:
