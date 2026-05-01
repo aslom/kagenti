@@ -987,6 +987,7 @@ if $BUILD_IMAGES && ! $DRY_RUN; then
   fi
   if $WITH_UI; then
     _BUILD_IMAGES+=("ghcr.io/kagenti/kagenti/ui-v2:latest|ui-v2/Dockerfile")
+    _BUILD_IMAGES+=("ghcr.io/kagenti/kagenti/ui-oauth-secret:latest|auth/ui-oauth-secret/Dockerfile")
   fi
   if $WITH_MLFLOW; then
     _BUILD_IMAGES+=("ghcr.io/kagenti/kagenti/mlflow-oauth-secret:latest|auth/mlflow-oauth-secret/Dockerfile")
