@@ -2,8 +2,8 @@
 # ============================================================================
 # OPENSHELL CLI CONFIGURATION
 # ============================================================================
-# Extracts cert-manager client certs from K8s secrets and configures the
-# local openshell CLI for mTLS gateway access. Dev-only — not needed in CI.
+# Registers a deployed OpenShell gateway with the local CLI using
+# `openshell gateway add`, including OIDC authentication parameters.
 #
 # Usage:
 #   scripts/openshell/configure-cli.sh <team>
@@ -11,19 +11,17 @@
 #   scripts/openshell/configure-cli.sh team1 --dry-run
 #   scripts/openshell/configure-cli.sh --help
 #
-# Prerequisites: kubectl, cert-manager installed, deploy-shared.sh and deploy-tenant.sh run
-#
-# Note: The gateway server cert must include the external hostname as a SAN
-# for TLS hostname validation to succeed. See charts/openshell/ certificate
-# template — add openshell-${TENANT}.${DOMAIN} to dnsNames if missing.
+# Prerequisites: openshell CLI installed, kubectl, deploy-shared.sh and
+#                deploy-tenant.sh already run
 # ============================================================================
 
 set -euo pipefail
 
 # ── Defaults ────────────────────────────────────────────────────────────────
+KEYCLOAK_NS="${KEYCLOAK_NS:-keycloak}"
 KIND_DOMAIN="localtest.me"
 GATEWAY_PORT=9443
-CONFIG_DIR="${OPENSHELL_CONFIG_DIR:-$HOME/.config/openshell}"
+OIDC_CLIENT_ID="openshell-cli"
 DRY_RUN=false
 TENANT=""
 
@@ -38,20 +36,20 @@ usage() {
   cat <<EOF
 Usage: $(basename "$0") <team> [OPTIONS]
 
-Extract cert-manager client certs from K8s secrets and configure the
-local openshell CLI for mTLS gateway access. Dev-only, not needed in CI.
+Register a deployed OpenShell gateway with the local CLI, including
+OIDC authentication. Dev-only, not needed in CI.
 
 Arguments:
   team                  Tenant name (e.g., team1, team2)
 
 Options:
   --help               Show this help message
-  --config-dir <dir>   openshell config directory (default: ~/.config/openshell)
-  --dry-run            Print actions without writing files
+  --dry-run            Print actions without executing
                        (note: platform detection still requires a live cluster context)
 
 After running this script:
-  openshell status     # verify gateway connection
+  openshell gateway login   # authenticate with Keycloak
+  openshell status          # verify gateway connection
 EOF
   exit 0
 }
@@ -61,7 +59,6 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --help)        usage ;;
     --dry-run)     DRY_RUN=true; shift ;;
-    --config-dir)  CONFIG_DIR="$2"; shift 2 ;;
     -*)
       log_error "Unknown option: $1"
       usage
@@ -82,6 +79,14 @@ if [[ -z "$TENANT" ]]; then
   exit 1
 fi
 
+# ── Preflight ────────────────────────────────────────────────────────────────
+if ! command -v openshell &>/dev/null; then
+  log_error "openshell CLI not found in PATH"
+  log_error "Build from https://github.com/kagenti/OpenShell (mvp branch):"
+  log_error "  cargo build --release -p openshell-cli && cp target/release/openshell ~/.local/bin/"
+  exit 1
+fi
+
 # ── Platform detection ───────────────────────────────────────────────────────
 is_openshift() {
   kubectl get crd routes.route.openshift.io &>/dev/null
@@ -93,13 +98,7 @@ get_ocp_base_domain() {
 }
 
 # ── Derived values ───────────────────────────────────────────────────────────
-CONTEXT="openshell-${TENANT}"
-SECRET_NAME="openshell-client-tls"
-SECRET_NS="$TENANT"
-GATEWAY_DIR="$CONFIG_DIR/gateways/$CONTEXT"
-MTLS_DIR="$GATEWAY_DIR/mtls"
-ACTIVE_FILE="$CONFIG_DIR/active_gateway"
-METADATA_FILE="$GATEWAY_DIR/metadata.json"
+GATEWAY_NAME="openshell-${TENANT}"
 
 if is_openshift; then
   BASE_DOMAIN=$(get_ocp_base_domain)
@@ -108,126 +107,45 @@ if is_openshift; then
     exit 1
   fi
   GATEWAY_ENDPOINT="https://openshell-${TENANT}.${BASE_DOMAIN}"
-  IS_REMOTE="true"
-  PORT=443
+  # OCP Keycloak uses the Route hostname
+  KC_HOST=$(kubectl get route keycloak -n "$KEYCLOAK_NS" -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+  OIDC_ISSUER="https://${KC_HOST}/realms/openshell"
 else
   GATEWAY_ENDPOINT="https://openshell-${TENANT}.${KIND_DOMAIN}:${GATEWAY_PORT}"
-  IS_REMOTE="false"
-  PORT=$GATEWAY_PORT
+  OIDC_ISSUER="http://keycloak.${KIND_DOMAIN}:8080/realms/openshell"
 fi
 
 echo ""
 echo "╔════════════════════════════════════════════════════════════════╗"
-echo "║  OpenShell CLI Configuration                                   ║"
+echo "║  OpenShell CLI Configuration                                 ║"
 echo "╚════════════════════════════════════════════════════════════════╝"
 echo ""
 echo "  Tenant:          $TENANT"
-echo "  Context:         $CONTEXT"
+echo "  Gateway name:    $GATEWAY_NAME"
 echo "  Gateway URL:     $GATEWAY_ENDPOINT"
-echo "  Secret:          $SECRET_NAME (namespace: $SECRET_NS)"
-echo "  Config dir:      $GATEWAY_DIR"
+echo "  OIDC issuer:     $OIDC_ISSUER"
+echo "  OIDC audience:   $TENANT"
 echo "  Dry run:         $DRY_RUN"
 echo ""
 
-# ── Step 1: Verify secret exists with all required keys ──────────────────────
-log_info "Step 1: Checking secret $SECRET_NAME in namespace $SECRET_NS"
+# ── Register gateway with CLI ────────────────────────────────────────────────
+log_info "Registering gateway with openshell CLI"
+
+ADD_ARGS=(
+  gateway add "$GATEWAY_ENDPOINT"
+  --name "$GATEWAY_NAME"
+  --oidc-issuer "$OIDC_ISSUER"
+  --oidc-audience "$TENANT"
+  --oidc-client-id "$OIDC_CLIENT_ID"
+)
 
 if $DRY_RUN; then
-  log_warn "dry-run: skipping secret validation"
+  echo "  [dry-run] openshell ${ADD_ARGS[*]}"
 else
-  if ! kubectl get secret "$SECRET_NAME" -n "$SECRET_NS" &>/dev/null; then
-    log_error "Secret $SECRET_NAME not found in namespace $SECRET_NS"
-    log_error "Run 'scripts/openshell/deploy-tenant.sh $TENANT' first and wait for cert-manager."
-    exit 1
-  fi
-
-  for key in ca.crt tls.crt tls.key; do
-    val=$(kubectl get secret "$SECRET_NAME" -n "$SECRET_NS" \
-      --template="{{index .data \"$key\"}}" 2>/dev/null || true)
-    if [[ -z "$val" ]]; then
-      log_error "Key '$key' not found in secret $SECRET_NAME"
-      log_error "The certificate may still be issuing — wait and retry."
-      exit 1
-    fi
-  done
-
-  log_success "Secret $SECRET_NAME found with all required keys"
-fi
-echo ""
-
-# ── Step 2: Create config directories ────────────────────────────────────────
-log_info "Step 2: Creating config directories"
-
-if ! $DRY_RUN; then
-  mkdir -p "$MTLS_DIR"
-  chmod 700 "$MTLS_DIR"
-else
-  echo "  [dry-run] mkdir -p $MTLS_DIR && chmod 700"
-fi
-
-log_success "Directories ready: $GATEWAY_DIR"
-echo ""
-
-# ── Step 3: Extract certs from K8s secret ────────────────────────────────────
-log_info "Step 3: Extracting certificates from secret"
-
-extract_cert() {
-  local key="$1"
-  local dest="$2"
-  if ! $DRY_RUN; then
-    kubectl get secret "$SECRET_NAME" -n "$SECRET_NS" \
-      --template="{{index .data \"$key\"}}" \
-      | base64 --decode > "$dest"
-    chmod 600 "$dest"
-  else
-    echo "  [dry-run] extract $key → $dest"
-  fi
-}
-
-extract_cert "ca.crt"  "$MTLS_DIR/ca.crt"
-extract_cert "tls.crt" "$MTLS_DIR/tls.crt"
-extract_cert "tls.key" "$MTLS_DIR/tls.key"
-
-log_success "Certs written to $MTLS_DIR"
-echo ""
-
-# ── Step 4: Write metadata.json ───────────────────────────────────────────────
-log_info "Step 4: Writing metadata.json"
-
-if ! $DRY_RUN; then
-  cat > "$METADATA_FILE" <<EOF
-{
-  "name": "$CONTEXT",
-  "gateway_endpoint": "$GATEWAY_ENDPOINT",
-  "is_remote": $IS_REMOTE,
-  "gateway_port": $PORT,
-  "auth_mode": "mtls"
-}
-EOF
-  log_success "Wrote $METADATA_FILE"
-else
-  echo "  [dry-run] write $METADATA_FILE:"
-  cat <<EOF
-  {
-    "name": "$CONTEXT",
-    "gateway_endpoint": "$GATEWAY_ENDPOINT",
-    "is_remote": $IS_REMOTE,
-    "gateway_port": $PORT,
-    "auth_mode": "mtls"
+  openshell "${ADD_ARGS[@]}" && log_success "Gateway registered" || {
+    log_warn "Gateway may already exist — trying select instead"
+    openshell gateway select "$GATEWAY_NAME" 2>/dev/null || true
   }
-EOF
-fi
-echo ""
-
-# ── Step 5: Set as active gateway ─────────────────────────────────────────────
-log_info "Step 5: Setting $CONTEXT as active gateway"
-
-if ! $DRY_RUN; then
-  mkdir -p "$CONFIG_DIR"
-  echo "$CONTEXT" > "$ACTIVE_FILE"
-  log_success "Active gateway: $CONTEXT (written to $ACTIVE_FILE)"
-else
-  echo "  [dry-run] echo $CONTEXT > $ACTIVE_FILE"
 fi
 echo ""
 
@@ -236,6 +154,7 @@ echo "╔═══════════════════════�
 echo "║  Done — CLI configured for tenant: $TENANT"
 echo "╚════════════════════════════════════════════════════════════════╝"
 echo ""
-echo "  Verify:"
-echo "    openshell status"
+echo "  Next steps:"
+echo "    openshell gateway login   # authenticate with Keycloak"
+echo "    openshell status          # verify gateway connection"
 echo ""
