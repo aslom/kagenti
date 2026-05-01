@@ -93,6 +93,7 @@ spec:
           args:
             - "--socket=/run/drivers/compute.sock"
             - "--namespace={{ include "openshell.driverNamespace" . }}"
+            - "--supervisor-image={{ .Values.supervisorImage.repository }}:{{ .Values.supervisorImage.tag }}"
             - "--dtach-binary-path=/usr/local/bin/openshell-sandbox"
           volumeMounts:
             - name: driver-sockets
