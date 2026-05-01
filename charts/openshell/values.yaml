@@ -61,6 +61,10 @@ quota:
   requestsCpu: "20"
   requestsMemory: "40Gi"
   pvcs: "10"
+  # Default resource requests applied via LimitRange to containers that
+  # don't specify their own (e.g. sandbox pods from agent-sandbox-controller)
+  defaultRequestCpu: 100m
+  defaultRequestMemory: 128Mi
 
 # -- Gateway resources
 resources:
