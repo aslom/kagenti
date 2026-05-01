@@ -151,6 +151,29 @@ else
 fi
 echo ""
 
+# ── Extract mTLS certificates ────────────────────────────────────────────────
+# The CLI requires the CA cert (for server verification) and client cert/key
+# (for mTLS handshake) in the gateway's mtls directory.
+MTLS_DIR="${HOME}/.config/openshell/gateways/${GATEWAY_NAME}/mtls"
+
+log_info "Extracting mTLS certificates from cluster"
+
+if $DRY_RUN; then
+  echo "  [dry-run] kubectl get secret openshell-server-tls -n $TENANT → $MTLS_DIR/ca.crt"
+  echo "  [dry-run] kubectl get secret openshell-client-tls -n $TENANT → $MTLS_DIR/tls.{crt,key}"
+else
+  mkdir -p "$MTLS_DIR"
+  kubectl get secret openshell-server-tls -n "$TENANT" \
+    -o jsonpath='{.data.ca\.crt}' | base64 -d > "$MTLS_DIR/ca.crt"
+  kubectl get secret openshell-client-tls -n "$TENANT" \
+    -o jsonpath='{.data.tls\.crt}' | base64 -d > "$MTLS_DIR/tls.crt"
+  kubectl get secret openshell-client-tls -n "$TENANT" \
+    -o jsonpath='{.data.tls\.key}' | base64 -d > "$MTLS_DIR/tls.key"
+  chmod 600 "$MTLS_DIR"/{ca.crt,tls.crt,tls.key}
+  log_success "mTLS certificates extracted to $MTLS_DIR"
+fi
+echo ""
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo "╔════════════════════════════════════════════════════════════════╗"
 echo "║  Done — CLI configured for tenant: $TENANT"
