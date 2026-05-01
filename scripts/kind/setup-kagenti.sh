@@ -840,6 +840,16 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
 EOF
 
+  # Build and load spiffe-idp-setup image to ensure correct arch for Kind
+  if $BUILD_IMAGES; then
+    log_info "Building spiffe-idp-setup image for Kind..."
+    $CONTAINER_ENGINE build --load \
+      -t "$SPIFFE_IDP_IMAGE" \
+      -f "$REPO_ROOT/kagenti/auth/spiffe-idp-setup/Dockerfile" \
+      "$REPO_ROOT/kagenti"
+    kind load docker-image "$SPIFFE_IDP_IMAGE" --name "$CLUSTER_NAME"
+  fi
+
   # Delete existing job (jobs are immutable)
   kubectl delete job kagenti-spiffe-idp-setup-job -n "$KAGENTI_NS" --ignore-not-found 2>/dev/null || true
 
@@ -980,9 +990,6 @@ if $BUILD_IMAGES && ! $DRY_RUN; then
   fi
   if $WITH_MLFLOW; then
     _BUILD_IMAGES+=("ghcr.io/kagenti/kagenti/mlflow-oauth-secret:latest|auth/mlflow-oauth-secret/Dockerfile")
-  fi
-  if $WITH_SPIRE; then
-    _BUILD_IMAGES+=("ghcr.io/kagenti/kagenti/spiffe-idp-setup:latest|auth/spiffe-idp-setup/Dockerfile")
   fi
 
   for spec in "${_BUILD_IMAGES[@]}"; do
