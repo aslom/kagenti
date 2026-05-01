@@ -981,6 +981,9 @@ if $BUILD_IMAGES && ! $DRY_RUN; then
   if $WITH_MLFLOW; then
     _BUILD_IMAGES+=("ghcr.io/kagenti/kagenti/mlflow-oauth-secret:latest|auth/mlflow-oauth-secret/Dockerfile")
   fi
+  if $WITH_SPIRE; then
+    _BUILD_IMAGES+=("ghcr.io/kagenti/kagenti/spiffe-idp-setup:latest|auth/spiffe-idp-setup/Dockerfile")
+  fi
 
   for spec in "${_BUILD_IMAGES[@]}"; do
     IFS='|' read -r img dockerfile <<< "$spec"

@@ -247,7 +247,7 @@ if [ "$RUN_INSTALL" = "true" ]; then
     ./.github/scripts/common/20-create-secrets.sh
 
     log_step "Running Kagenti installer..."
-    ./scripts/kind/setup-kagenti.sh --with-all --skip-cluster --cluster-name "$CLUSTER_NAME"
+    ./scripts/kind/setup-kagenti.sh --with-all --skip-cluster --build-images --cluster-name "$CLUSTER_NAME"
 
     log_step "Waiting for platform to be ready..."
     ./.github/scripts/common/40-wait-platform-ready.sh
