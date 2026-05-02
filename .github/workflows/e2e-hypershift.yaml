@@ -203,7 +203,7 @@ jobs:
         run: bash .github/scripts/hypershift/ci/80-run-e2e-tests.sh
         env:
           KUBECONFIG: ${{ steps.create-cluster.outputs.cluster_kubeconfig }}
-          KAGENTI_CONFIG_FILE: deployments/envs/ocp_values.yaml
+          KAGENTI_CONFIG_FILE: deployments/envs/ocp_ci_values.yaml
 
       - name: Run UI E2E tests
         if: success()
