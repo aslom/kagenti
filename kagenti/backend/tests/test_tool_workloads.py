@@ -704,6 +704,19 @@ class TestBuildToolEnvVarsPortOverride:
         port_var = next(ev for ev in env_vars if ev["name"] == "PORT")
         assert port_var["value"] == "3000"
 
+    def test_port_preserves_default_for_empty_service_ports(self):
+        """Empty servicePorts list preserves default PORT=8000."""
+        env_vars = _build_tool_env_vars(service_ports=[])
+        port_var = next(ev for ev in env_vars if ev["name"] == "PORT")
+        assert port_var["value"] == "8000"
+
+    def test_port_preserves_default_when_no_target_port_key(self):
+        """servicePorts entry without targetPort key preserves default."""
+        service_ports = [{"name": "http", "port": 9090, "protocol": "TCP"}]
+        env_vars = _build_tool_env_vars(service_ports=service_ports)
+        port_var = next(ev for ev in env_vars if ev["name"] == "PORT")
+        assert port_var["value"] == "8000"
+
 
 DEFAULT_ENV_VARS = [
     {"name": "PORT", "value": "8000"},
@@ -717,7 +730,7 @@ def _build_tool_env_vars(env_var_list=None, service_ports=None):
 
     if service_ports:
         target_port = service_ports[0].get("targetPort")
-        if target_port:
+        if target_port is not None:
             env_vars = [
                 ev if ev["name"] != "PORT" else {"name": "PORT", "value": str(target_port)}
                 for ev in env_vars

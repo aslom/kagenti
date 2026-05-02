@@ -361,7 +361,7 @@ def _build_tool_env_vars(
 
     if service_ports:
         target_port = service_ports[0].get("targetPort")
-        if target_port:
+        if target_port is not None:
             env_vars = [
                 ev if ev["name"] != "PORT" else {"name": "PORT", "value": str(target_port)}
                 for ev in env_vars
