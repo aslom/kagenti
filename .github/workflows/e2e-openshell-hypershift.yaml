@@ -40,7 +40,7 @@ jobs:
     steps:
       - name: Check write permission
         id: check
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea  # v7.0.1
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
         with:
           script: |
             if (context.eventName === 'workflow_dispatch') {
@@ -58,7 +58,7 @@ jobs:
       - name: Get PR info
         id: pr-info
         if: steps.check.outputs.has-permission == 'true' && github.event_name != 'workflow_dispatch'
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea  # v7.0.1
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
         with:
           script: |
             const { data: pr } = await github.rest.pulls.get({
@@ -71,7 +71,7 @@ jobs:
 
       - name: React with rocket
         if: steps.check.outputs.has-permission == 'true' && github.event_name != 'workflow_dispatch'
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea  # v7.0.1
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
         with:
           script: |
             await github.rest.reactions.createForIssueComment({
@@ -216,7 +216,7 @@ jobs:
       pull-requests: write
     steps:
       - name: Post result comment
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea  # v7.0.1
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
         with:
           script: |
             // With continue-on-error, 'result' is always 'success'.
