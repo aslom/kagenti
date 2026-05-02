@@ -536,6 +536,21 @@ _apply_operand_crs() {
   done
   log_success "ZTWIM CRDs available"
 
+  # Wait for Sail Operator CRDs — Istio/ztunnel/CNI operands depend on this.
+  log_info "Waiting for Sail Operator CRDs..."
+  tries=0
+  while ! $KUBECTL get crd istios.sailoperator.io &>/dev/null; do
+    tries=$((tries + 1))
+    if [ $tries -ge 120 ]; then
+      log_error "Sail Operator CRDs not found after 10m — check operator subscription"
+      $KUBECTL get subscription -n openshift-operators 2>/dev/null || true
+      $KUBECTL get csv -n openshift-operators 2>/dev/null | grep -i sail || true
+      return 1
+    fi
+    sleep 5
+  done
+  log_success "Sail Operator CRDs available"
+
   log_info "Applying operand CRs..."
   helm get hooks kagenti-deps -n kagenti-system 2>/dev/null | python3 -c "
 import sys
