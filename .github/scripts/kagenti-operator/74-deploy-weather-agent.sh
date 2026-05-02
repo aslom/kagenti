@@ -15,7 +15,9 @@ log_step "74" "Deploying weather-service agent"
 # On Kind, the deployment manifest references ghcr.io directly — no build needed.
 # ============================================================================
 
-if [ "$IS_OPENSHIFT" = "true" ]; then
+SHIPWRIGHT_BUILD=false
+if [ "$IS_OPENSHIFT" = "true" ] && kubectl get crd builds.shipwright.io &>/dev/null; then
+    SHIPWRIGHT_BUILD=true
     log_info "Using OpenShift Shipwright files with internal registry"
 
     # Clean up previous Build to avoid conflicts
@@ -82,7 +84,7 @@ if [ "$IS_OPENSHIFT" = "true" ]; then
 
     log_success "BuildRun completed successfully"
 else
-    log_info "Using ghcr.io image for Kind — skipping Shipwright build"
+    log_info "Shipwright not available — using ghcr.io image"
 fi
 
 # ============================================================================
@@ -95,8 +97,8 @@ log_info "Creating Deployment and Service..."
 # Create ServiceAccount (required by webhook for correct SPIFFE ID derivation)
 kubectl create serviceaccount weather-service -n team1 --dry-run=client -o yaml | kubectl apply -f -
 
-# Apply Deployment manifest (use OCP-specific file with correct registry on OpenShift)
-if [ "$IS_OPENSHIFT" = "true" ]; then
+# Apply Deployment manifest (OCP internal registry only when Shipwright built the image)
+if [ "$SHIPWRIGHT_BUILD" = "true" ]; then
     kubectl apply -f "$REPO_ROOT/kagenti/examples/agents/weather_service_deployment_ocp.yaml"
 else
     kubectl apply -f "$REPO_ROOT/kagenti/examples/agents/weather_service_deployment.yaml"
