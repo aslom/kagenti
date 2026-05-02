@@ -1889,7 +1889,9 @@ async def finalize_tool_shipwright_build(
         if request.envVars:
             env_vars = _build_tool_env_vars(request.envVars, service_ports=service_ports)
         elif tool_config_dict.get("envVars"):
-            env_vars = _build_tool_env_vars([EnvVar(**ev) for ev in tool_config_dict["envVars"]], service_ports=service_ports)
+            env_vars = _build_tool_env_vars(
+                [EnvVar(**ev) for ev in tool_config_dict["envVars"]], service_ports=service_ports
+            )
         else:
             env_vars = _build_tool_env_vars(service_ports=service_ports)
 
