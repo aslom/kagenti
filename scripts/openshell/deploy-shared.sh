@@ -208,6 +208,21 @@ EOF
     fi
     log_success "Shared TLS passthrough Gateway created"
   fi
+
+  # Fix NodePort to 30443 so it matches Kind extraPortMappings (host 9443 → container 30443)
+  KIND_TLS_NODEPORT=30443
+  CURRENT_NODEPORT=$(kubectl get svc tls-passthrough-istio -n kagenti-system \
+    -o jsonpath='{.spec.ports[?(@.port==443)].nodePort}' 2>/dev/null || echo "")
+  if [[ -n "$CURRENT_NODEPORT" && "$CURRENT_NODEPORT" != "$KIND_TLS_NODEPORT" ]]; then
+    log_info "Fixing TLS NodePort: $CURRENT_NODEPORT → $KIND_TLS_NODEPORT"
+    if ! $DRY_RUN; then
+      kubectl patch svc tls-passthrough-istio -n kagenti-system --type='json' \
+        -p="[{\"op\": \"replace\", \"path\": \"/spec/ports/1/nodePort\", \"value\": $KIND_TLS_NODEPORT}]"
+    else
+      echo "  [dry-run] kubectl patch svc tls-passthrough-istio NodePort → $KIND_TLS_NODEPORT"
+    fi
+    log_success "TLS NodePort fixed to $KIND_TLS_NODEPORT"
+  fi
   echo ""
 fi
 
