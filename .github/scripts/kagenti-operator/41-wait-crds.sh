@@ -20,14 +20,23 @@ MCP_RESOURCES=(
     "mcpgatewayextensions"
 )
 
-# Detect which MCP CRD domain is installed (quick check, no wait)
-if kubectl get crd "mcpserverregistrations.mcp.kagenti.com" &>/dev/null; then
+# Detect which MCP CRD domain is installed.
+# Retry up to 60s since operators may still be registering CRDs.
+MCP_DOMAIN=""
+for i in $(seq 1 12); do
+    if kubectl get crd "mcpserverregistrations.mcp.kagenti.com" &>/dev/null; then
+        MCP_DOMAIN="mcp.kagenti.com"
+        break
+    elif kubectl get crd "mcpserverregistrations.mcp.kuadrant.io" &>/dev/null; then
+        MCP_DOMAIN="mcp.kuadrant.io"
+        break
+    fi
+    log_info "MCP CRDs not yet available, retrying ($i/12)..."
+    sleep 5
+done
+if [ -z "$MCP_DOMAIN" ]; then
     MCP_DOMAIN="mcp.kagenti.com"
-elif kubectl get crd "mcpserverregistrations.mcp.kuadrant.io" &>/dev/null; then
-    MCP_DOMAIN="mcp.kuadrant.io"
-else
-    # Neither exists yet — default to new domain and let wait_for_crd handle the timeout
-    MCP_DOMAIN="mcp.kagenti.com"
+    log_info "Defaulting to $MCP_DOMAIN (neither domain detected after 60s)"
 fi
 log_info "MCP CRD domain: $MCP_DOMAIN"
 

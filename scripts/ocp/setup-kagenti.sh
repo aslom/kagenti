@@ -520,6 +520,22 @@ _apply_operand_crs() {
   done
   log_success "Keycloak CRD available"
 
+  # Wait for ZTWIM operator CRDs — the Subscription was just created and
+  # OLM needs time to install the operator CSV which registers the CRDs.
+  log_info "Waiting for ZTWIM (SPIRE) CRDs..."
+  tries=0
+  while ! $KUBECTL get crd spiffecsidrivers.operator.openshift.io &>/dev/null; do
+    tries=$((tries + 1))
+    if [ $tries -ge 120 ]; then
+      log_error "ZTWIM CRDs not found after 10m — check operator subscription"
+      $KUBECTL get subscription -n zero-trust-workload-identity-manager 2>/dev/null || true
+      $KUBECTL get csv -n zero-trust-workload-identity-manager 2>/dev/null || true
+      return 1
+    fi
+    sleep 5
+  done
+  log_success "ZTWIM CRDs available"
+
   log_info "Applying operand CRs..."
   helm get hooks kagenti-deps -n kagenti-system 2>/dev/null | python3 -c "
 import sys
