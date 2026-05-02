@@ -340,6 +340,7 @@ router = APIRouter(prefix="/tools", tags=["tools"])
 
 def _build_tool_env_vars(
     env_var_list: Optional[List[EnvVar]] = None,
+    service_ports: Optional[List[dict]] = None,
 ) -> List[dict]:
     """
     Build environment variables list with support for valueFrom references.
@@ -349,11 +350,23 @@ def _build_tool_env_vars(
 
     Args:
         env_var_list: Optional list of EnvVar models from the request.
+        service_ports: Optional list of service port dicts. When provided,
+            the PORT env var is set to match the first entry's targetPort
+            so the container listens where the K8s Service routes traffic.
 
     Returns:
         List of environment variable dictionaries.
     """
     env_vars = list(DEFAULT_ENV_VARS)
+
+    if service_ports:
+        target_port = service_ports[0].get("targetPort")
+        if target_port:
+            env_vars = [
+                ev if ev["name"] != "PORT" else {"name": "PORT", "value": str(target_port)}
+                for ev in env_vars
+            ]
+
     if env_var_list:
         for ev in env_var_list:
             if ev.value is not None:
@@ -1450,13 +1463,13 @@ async def create_tool(
                     detail="containerImage is required for image deployment",
                 )
 
-            # Prepare env vars (always called so tools get DEFAULT_ENV_VARS)
-            env_vars = _build_tool_env_vars(request.envVars)
-
             # Prepare service ports
             service_ports = None
             if request.servicePorts:
                 service_ports = [sp.model_dump() for sp in request.servicePorts]
+
+            # Prepare env vars (always called so tools get DEFAULT_ENV_VARS)
+            env_vars = _build_tool_env_vars(request.envVars, service_ports=service_ports)
 
             # Set description if not provided
             description = request.description
@@ -1865,20 +1878,20 @@ async def finalize_tool_shipwright_build(
             "workloadType", WORKLOAD_TYPE_DEPLOYMENT
         )
 
-        # Build env vars (always include DEFAULT_ENV_VARS)
-        if request.envVars:
-            env_vars = _build_tool_env_vars(request.envVars)
-        elif tool_config_dict.get("envVars"):
-            env_vars = _build_tool_env_vars([EnvVar(**ev) for ev in tool_config_dict["envVars"]])
-        else:
-            env_vars = _build_tool_env_vars()
-
         # Build service ports
         service_ports = None
         if request.servicePorts:
             service_ports = [sp.model_dump() for sp in request.servicePorts]
         elif tool_config_dict.get("servicePorts"):
             service_ports = tool_config_dict["servicePorts"]
+
+        # Build env vars (always include DEFAULT_ENV_VARS)
+        if request.envVars:
+            env_vars = _build_tool_env_vars(request.envVars, service_ports=service_ports)
+        elif tool_config_dict.get("envVars"):
+            env_vars = _build_tool_env_vars([EnvVar(**ev) for ev in tool_config_dict["envVars"]], service_ports=service_ports)
+        else:
+            env_vars = _build_tool_env_vars(service_ports=service_ports)
 
         # Determine image pull secret
         image_pull_secret = request.imagePullSecret or tool_config_dict.get("registrySecret")

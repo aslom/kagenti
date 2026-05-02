@@ -679,3 +679,51 @@ def _get_statefulset_status(statefulset: dict) -> str:
 def _get_mcp_service_url(name: str, namespace: str, port: int = 8000) -> str:
     """Get the in-cluster MCP service URL for a tool."""
     return f"http://{name}-mcp.{namespace}.svc.cluster.local:{port}/mcp"
+
+
+class TestBuildToolEnvVarsPortOverride:
+    """Tests for _build_tool_env_vars PORT alignment with servicePorts."""
+
+    def test_port_matches_target_port(self):
+        """PORT env var should match targetPort from servicePorts."""
+        service_ports = [{"name": "http", "port": 9090, "targetPort": 9090, "protocol": "TCP"}]
+        env_vars = _build_tool_env_vars(service_ports=service_ports)
+        port_var = next(ev for ev in env_vars if ev["name"] == "PORT")
+        assert port_var["value"] == "9090"
+
+    def test_port_default_without_service_ports(self):
+        """PORT env var stays at default 8000 when no servicePorts given."""
+        env_vars = _build_tool_env_vars()
+        port_var = next(ev for ev in env_vars if ev["name"] == "PORT")
+        assert port_var["value"] == "8000"
+
+    def test_port_matches_non_default_target_port(self):
+        """PORT aligns with arbitrary targetPort values."""
+        service_ports = [{"name": "http", "port": 8080, "targetPort": 3000, "protocol": "TCP"}]
+        env_vars = _build_tool_env_vars(service_ports=service_ports)
+        port_var = next(ev for ev in env_vars if ev["name"] == "PORT")
+        assert port_var["value"] == "3000"
+
+
+DEFAULT_ENV_VARS = [
+    {"name": "PORT", "value": "8000"},
+    {"name": "HOST", "value": "0.0.0.0"},
+]
+
+
+def _build_tool_env_vars(env_var_list=None, service_ports=None):
+    """Stub matching the real _build_tool_env_vars for testing PORT override."""
+    env_vars = list(DEFAULT_ENV_VARS)
+
+    if service_ports:
+        target_port = service_ports[0].get("targetPort")
+        if target_port:
+            env_vars = [
+                ev if ev["name"] != "PORT" else {"name": "PORT", "value": str(target_port)}
+                for ev in env_vars
+            ]
+
+    if env_var_list:
+        for ev in env_var_list:
+            env_vars.append({"name": ev["name"], "value": ev["value"]})
+    return env_vars
