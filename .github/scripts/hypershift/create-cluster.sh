@@ -655,7 +655,7 @@ oc get nodes
 ./.github/scripts/kagenti-operator/74-deploy-weather-agent.sh
 
 export AGENT_URL="https://\$(oc get route -n team1 weather-service -o jsonpath='{.spec.host}')"
-export KAGENTI_CONFIG_FILE=deployments/envs/ocp_values.yaml
+export KAGENTI_CONFIG_FILE=deployments/envs/ocp_ci_values.yaml
 ./.github/scripts/kagenti-operator/90-run-e2e-tests.sh
 
 # ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
