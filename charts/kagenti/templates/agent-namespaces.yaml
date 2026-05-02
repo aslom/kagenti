@@ -19,6 +19,8 @@ metadata:
     istio.io/dataplane-mode: ambient
     istio.io/use-waypoint: waypoint
     shared-gateway-access: "true"
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/warn: privileged
   {{- include "kagenti.labels" $root | nindent 4 }}
 ---
 # ——————————————————————————————————————————————————————————————————————————————
