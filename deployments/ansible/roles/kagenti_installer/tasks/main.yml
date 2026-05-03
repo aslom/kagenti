@@ -1912,8 +1912,8 @@
         create_namespace: false
         wait: true
         timeout: "{{ helm_wait_timeout }}s"
+        # kagenti_latest_tag is only set on OpenShift; non-OCP installs use the chart default (latest)
         values: >-
-          {# kagenti_latest_tag is only set on OpenShift; non-OCP installs use the chart default (latest) #}
           {{ (((charts['kagenti'] | default({})).get('values')) | default({}))
             | combine(({'ui': {'frontend': {'tag': kagenti_latest_tag}, 'backend': {'tag': kagenti_latest_tag}}} if kagenti_latest_tag is defined else {}), recursive=True)
             | combine((global_values_merged | default({}) | dict2items | rejectattr('key', 'in', ['charts', 'gatewayApi', 'certManager', 'tekton', 'shipwright', 'kiali', 'secrets', 'values_files', 'create_kind_cluster', 'kind_cluster_name', 'kind_images_preload', 'container_engine', 'kind_config', 'kind_config_registry', 'preload_images_file']) | list | items2dict), recursive=True)
