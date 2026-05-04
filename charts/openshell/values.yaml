@@ -5,7 +5,7 @@ tenant: ""
 images:
   gateway:
     repository: ghcr.io/kagenti/openshell/gateway
-    tag: mvp-00a418f
+    tag: mvp-a9aa694
     pullPolicy: IfNotPresent
   computeDriver:
     repository: ghcr.io/kagenti/openshell-driver-openshift/compute-driver

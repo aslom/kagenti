@@ -26,7 +26,7 @@ CHART_DIR="$REPO_ROOT/charts/openshell"
 HELM_RELEASE_PREFIX="openshell"
 KIND_DOMAIN="localtest.me"
 KIND_TLS_NODEPORT=30443
-IMAGE_TAG="${OPENSHELL_IMAGE_TAG:-latest}"
+IMAGE_TAG="${OPENSHELL_IMAGE_TAG:-}"
 DRY_RUN=false
 TIMEOUT=120
 EXTRA_HELM_SETS=()  # Additional --set arguments
@@ -168,6 +168,13 @@ else
   EXTRA_HELM_SETS+=("trustedCABundle=$COMBINED_CA_CM")
 fi
 
+# Override image tags only when explicitly requested (otherwise use values.yaml defaults)
+if [[ -n "$IMAGE_TAG" ]]; then
+  EXTRA_HELM_SETS+=("images.gateway.tag=$IMAGE_TAG")
+  EXTRA_HELM_SETS+=("images.computeDriver.tag=$IMAGE_TAG")
+  EXTRA_HELM_SETS+=("images.credentialsDriver.tag=$IMAGE_TAG")
+fi
+
 echo ""
 echo "╔════════════════════════════════════════════════════════════════╗"
 echo "║  OpenShell Tenant Deployment                                 ║"
@@ -179,7 +186,7 @@ echo "  Namespace:      $TENANT"
 echo "  Ingress type:   $INGRESS_TYPE"
 echo "  Ingress host:   $INGRESS_HOST"
 echo "  OIDC issuer:    $OIDC_ISSUER"
-echo "  Image tag:      $IMAGE_TAG"
+echo "  Image tag:      ${IMAGE_TAG:-(from values.yaml)}"
 echo "  Chart:          $CHART_DIR"
 echo "  Dry run:        $DRY_RUN"
 echo ""
@@ -219,9 +226,6 @@ HELM_ARGS=(
   --set "driver.namespace=$TENANT"
   --set "ingress.type=$INGRESS_TYPE"
   --set "ingress.host=$INGRESS_HOST"
-  --set "images.gateway.tag=$IMAGE_TAG"
-  --set "images.computeDriver.tag=$IMAGE_TAG"
-  --set "images.credentialsDriver.tag=$IMAGE_TAG"
   --wait
   --timeout "${TIMEOUT}s"
 )
