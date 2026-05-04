@@ -110,7 +110,7 @@ wait_deployment_ready() {
 
 # ── Helper: detect OpenShift ────────────────────────────────────────────────
 is_openshift() {
-  kubectl get crd routes.route.openshift.io &>/dev/null
+  kubectl get clusterversion &>/dev/null
 }
 
 # ============================================================================

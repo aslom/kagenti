@@ -93,7 +93,7 @@ fi
 
 # ── Helper: detect OpenShift ────────────────────────────────────────────────
 is_openshift() {
-  kubectl get crd routes.route.openshift.io &>/dev/null
+  kubectl get clusterversion &>/dev/null
 }
 
 # ── Helper: get OpenShift base domain ───────────────────────────────────────
@@ -154,6 +154,18 @@ if ! is_openshift; then
   if [[ -n "$KEYCLOAK_CLUSTER_IP" ]]; then
     EXTRA_HELM_SETS+=("keycloakClusterIP=$KEYCLOAK_CLUSTER_IP")
   fi
+else
+  # OpenShift: build a combined CA bundle (system CAs + ingress CA) so the
+  # gateway can verify TLS to the Keycloak route (edge-terminated).
+  log_info "Creating combined trusted CA bundle (system + ingress CA)..."
+  COMBINED_CA_CM="openshell-trusted-ca"
+  (
+    kubectl get configmap config-trusted-cabundle -n "$TENANT" -o jsonpath='{.data.ca-bundle\.crt}' 2>/dev/null
+    echo
+    kubectl get secret router-ca -n openshift-ingress-operator -o jsonpath='{.data.tls\.crt}' 2>/dev/null | base64 -d
+  ) | kubectl create configmap "$COMBINED_CA_CM" -n "$TENANT" \
+        --from-file=ca-bundle.crt=/dev/stdin --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  EXTRA_HELM_SETS+=("trustedCABundle=$COMBINED_CA_CM")
 fi
 
 echo ""

@@ -54,6 +54,12 @@ tls:
   # Renew before expiry
   renewBefore: 720h
 
+# -- Trusted CA bundle ConfigMap name (OpenShift: label a CM with
+# config.openshift.io/inject-cabundle=true to get the cluster CAs injected).
+# When set, the CA bundle is mounted into the gateway so it can verify
+# TLS connections to the Keycloak route.
+trustedCABundle: ""
+
 # -- Ingress configuration
 ingress:
   # "istio" for Kind (TLSRoute via shared gateway) or "route" for OpenShift (passthrough Route)
