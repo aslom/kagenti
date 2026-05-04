@@ -70,6 +70,7 @@ import yaml from 'js-yaml';
 
 import { agentService, authBridgeService, chatService, configService, shipwrightService, ShipwrightBuildInfo } from '@/services/api';
 import { AgentChat } from '@/components/AgentChat';
+import { useFeatureFlags } from '@/hooks/useFeatureFlags';
 
 interface StatusCondition {
   type: string;
@@ -107,6 +108,7 @@ export const AgentDetailPage: React.FC = () => {
   const { namespace, name } = useParams<{ namespace: string; name: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const features = useFeatureFlags();
   const [activeTab, setActiveTab] = React.useState<string | number>(0);
   const [isAgentCardExpanded, setIsAgentCardExpanded] = React.useState(false);
   const [deleteModalOpen, setDeleteModalOpen] = React.useState(false);
@@ -214,13 +216,13 @@ export const AgentDetailPage: React.FC = () => {
   const { data: authBridgeConfig, isLoading: isAuthBridgeConfigLoading } = useQuery({
     queryKey: ['authbridge-config', namespace, name],
     queryFn: () => authBridgeService.getConfig(namespace!, name!),
-    enabled: !!namespace && !!name && hasAuthBridge,
+    enabled: !!namespace && !!name && hasAuthBridge && features.authbridgeAPI,
   });
 
   const { data: authBridgeStats, isLoading: isAuthBridgeStatsLoading } = useQuery({
     queryKey: ['authbridge-status', namespace, name],
     queryFn: () => authBridgeService.getStatus(namespace!, name!),
-    enabled: !!namespace && !!name && hasAuthBridge,
+    enabled: !!namespace && !!name && hasAuthBridge && features.authbridgeAPI,
   });
 
   if (isLoading) {
@@ -1022,7 +1024,7 @@ export const AgentDetailPage: React.FC = () => {
             </Card>
           </Tab>
 
-          {hasAuthBridge && <Tab eventKey={4} title={<TabTitleText>AuthBridge</TabTitleText>}>
+          {hasAuthBridge && features.authbridgeAPI && <Tab eventKey={4} title={<TabTitleText>AuthBridge</TabTitleText>}>
             <Grid hasGutter style={{ marginTop: '16px' }}>
               <GridItem md={6}>
                 <Card>

@@ -12,6 +12,7 @@ featureFlags:
   triggers: false
   agentSandbox: false
   skills: false
+  authbridgeAPI: false
 
 # ------------------------------------------------------------------
 #  Control Panel: Enable or disable components here
