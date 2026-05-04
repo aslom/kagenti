@@ -98,6 +98,9 @@ spec:
             - "--dtach-binary-path=/usr/local/bin/openshell-sandbox"
             - "--tls-ca-secret=openshell-server-tls"
             - "--tls-client-secret=openshell-client-tls"
+            {{- if .Values.sandboxImagePullPolicy }}
+            - "--sandbox-image-pull-policy={{ .Values.sandboxImagePullPolicy }}"
+            {{- end }}
           volumeMounts:
             - name: driver-sockets
               mountPath: /run/drivers

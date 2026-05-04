@@ -9,7 +9,7 @@ images:
     pullPolicy: IfNotPresent
   computeDriver:
     repository: ghcr.io/kagenti/openshell-driver-openshift/compute-driver
-    tag: mvp-8c86191
+    tag: mvp-a5f33f4
     pullPolicy: IfNotPresent
   credentialsDriver:
     repository: ghcr.io/kagenti/openshell-credentials-keycloak/credentials-driver
@@ -32,6 +32,11 @@ keycloakClusterIP: ""
 supervisorImage:
   repository: ghcr.io/kagenti/openshell/supervisor
   tag: latest
+
+# -- Image pull policy for sandbox pods (init + agent containers).
+# Valid values: Always, IfNotPresent, Never.
+# Empty string means use the Kubernetes default (Always for :latest, IfNotPresent otherwise).
+sandboxImagePullPolicy: "IfNotPresent"
 
 # -- Compute driver settings
 driver:
