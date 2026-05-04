@@ -301,9 +301,7 @@ async def _stream_from_response(
                 detail = response.text[:500]
             except Exception:
                 detail = str(response.status_code)
-            logger.error(
-                "Agent error: %d: %s", response.status_code, detail.replace("\n", " ")
-            )
+            logger.error("Agent error: %d: %s", response.status_code, detail.replace("\n", " "))
             payload = {"error": f"Agent error: {response.status_code}", "session_id": session_id}
             yield f"data: {json.dumps(payload)}\n\n"
             return
@@ -424,9 +422,7 @@ async def _stream_from_response(
                         logger.warning("Unknown result structure: keys=%s", list(result.keys()))
 
                 except json.JSONDecodeError as e:
-                    logger.warning(
-                        "Failed to parse SSE data: %.200s, error: %s", data, e
-                    )
+                    logger.warning("Failed to parse SSE data: %.200s, error: %s", data, e)
                     continue
 
     except httpx.RequestError as e:
@@ -493,7 +489,7 @@ async def stream_message(
         },
     }
 
-    logger.info("Starting A2A stream to %s with session_id=%s", agent_url, session_id)
+    logger.debug("Starting A2A stream to %s with session_id=%s", agent_url, session_id)
 
     client = httpx.AsyncClient(timeout=120.0)
     try:
