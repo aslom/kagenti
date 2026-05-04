@@ -8,22 +8,25 @@ Verifies that when an agent rejects a request with 401 (audience mismatch),
 the backend returns HTTP 401 to the frontend so the UI can trigger token refresh.
 """
 
-import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
-import httpx
+from unittest.mock import patch
 
+import httpx
+import pytest
 from fastapi.testclient import TestClient
 
 
 @pytest.fixture
 def app():
     """Create FastAPI app with mocked auth dependencies."""
-    with patch.dict("os.environ", {"KUBERNETES_SERVICE_HOST": "fake"}, clear=False):
-        with patch("app.services.kubernetes.kubernetes.config.load_incluster_config"):
-            with patch("app.services.kubernetes.kubernetes.client.ApiClient"):
-                from app.main import app as fastapi_app
+    with (
+        patch.dict("os.environ", {"KUBERNETES_SERVICE_HOST": "fake"}, clear=False),
+        patch("app.services.kubernetes.kubernetes.config.load_incluster_config"),
+        patch("app.services.kubernetes.kubernetes.config.load_kube_config"),
+        patch("app.services.kubernetes.kubernetes.client.ApiClient"),
+    ):
+        from app.main import app as fastapi_app
 
-                return fastapi_app
+        return fastapi_app
 
 
 @pytest.fixture
@@ -62,9 +65,7 @@ def mock_resolve_agent_url():
 class TestStreamMessage401:
     """Test that agent 401 responses are propagated as HTTP 401."""
 
-    def test_agent_401_returns_http_401(
-        self, client, mock_auth, mock_resolve_agent_url
-    ):
+    def test_agent_401_returns_http_401(self, client, mock_auth, mock_resolve_agent_url):
         """When agent returns 401, backend should return HTTP 401 (not 200 with SSE error)."""
         mock_response = httpx.Response(
             status_code=401,
@@ -84,9 +85,7 @@ class TestStreamMessage401:
         assert response.status_code == 401
         assert "audience" in response.json().get("detail", "").lower()
 
-    def test_agent_503_on_connection_error(
-        self, client, mock_auth, mock_resolve_agent_url
-    ):
+    def test_agent_503_on_connection_error(self, client, mock_auth, mock_resolve_agent_url):
         """When agent is unreachable, backend should return HTTP 503."""
 
         async def mock_send(self, request, *, stream=False, **kwargs):
