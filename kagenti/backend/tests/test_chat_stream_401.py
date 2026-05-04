@@ -8,7 +8,7 @@ Verifies that when an agent rejects a request with 401 (audience mismatch),
 the backend returns HTTP 401 to the frontend so the UI can trigger token refresh.
 """
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture
 def app():
-    """Create FastAPI app with mocked auth dependencies."""
+    """Create FastAPI app with mocked Kubernetes dependencies."""
     with (
         patch.dict("os.environ", {"KUBERNETES_SERVICE_HOST": "fake"}, clear=False),
         patch("app.services.kubernetes.kubernetes.config.load_incluster_config"),
@@ -26,11 +26,15 @@ def app():
     ):
         from app.main import app as fastapi_app
 
-        return fastapi_app
+        yield fastapi_app
+        fastapi_app.dependency_overrides.clear()
 
 
 @pytest.fixture
 def client(app):
+    from app.services.kubernetes import get_kubernetes_service
+
+    app.dependency_overrides[get_kubernetes_service] = lambda: MagicMock()
     return TestClient(app)
 
 
@@ -50,7 +54,6 @@ def mock_auth(app):
     app.dependency_overrides[get_required_user] = lambda: user
     app.dependency_overrides[require_roles("kagenti-operator")] = lambda: None
     yield user
-    app.dependency_overrides.clear()
 
 
 @pytest.fixture
