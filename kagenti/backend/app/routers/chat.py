@@ -301,8 +301,11 @@ async def _stream_from_response(
                 detail = response.text[:500]
             except Exception:
                 detail = str(response.status_code)
-            logger.error(f"Agent error: {response.status_code}: {detail}")
-            yield f"data: {json.dumps({'error': f'Agent error: {response.status_code}', 'session_id': session_id})}\n\n"
+            logger.error(
+                "Agent error: %d: %s", response.status_code, detail.replace("\n", " ")
+            )
+            payload = {"error": f"Agent error: {response.status_code}", "session_id": session_id}
+            yield f"data: {json.dumps(payload)}\n\n"
             return
 
         logger.debug("Connected to agent, status=%d", response.status_code)
@@ -418,10 +421,12 @@ async def _stream_from_response(
                         yield f"data: {json.dumps(payload)}\n\n"
 
                     else:
-                        logger.warning(f"Unknown result structure: keys={list(result.keys())}")
+                        logger.warning("Unknown result structure: keys=%s", list(result.keys()))
 
                 except json.JSONDecodeError as e:
-                    logger.warning(f"Failed to parse SSE data: {data[:200]}, error: {e}")
+                    logger.warning(
+                        "Failed to parse SSE data: %.200s, error: %s", data, e
+                    )
                     continue
 
     except httpx.RequestError as e:
@@ -488,7 +493,7 @@ async def stream_message(
         },
     }
 
-    logger.info(f"Starting A2A stream to {agent_url} with session_id={session_id}")
+    logger.info("Starting A2A stream to %s with session_id=%s", agent_url, session_id)
 
     client = httpx.AsyncClient(timeout=120.0)
     try:
@@ -498,7 +503,8 @@ async def stream_message(
         )
     except httpx.RequestError as e:
         await client.aclose()
-        raise HTTPException(status_code=503, detail=f"Cannot connect to agent: {e}")
+        logger.error("Cannot connect to agent at %s: %s", agent_url, e)
+        raise HTTPException(status_code=503, detail="Cannot connect to agent")
 
     if response.status_code == 401:
         await response.aclose()
