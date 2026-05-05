@@ -117,6 +117,8 @@ jobs:
           file: ${{ matrix.image_config.context }}/${{ matrix.image_config.dockerfile }}
           load: true
           tags: ${{ matrix.image_config.name }}:smoke-test
+          build-args: |
+            RELEASE_TAG=${{ github.ref_name }}
 
       - name: Run smoke test for ${{ matrix.image_config.name }}
         if: matrix.image_config.smoke_cmd
