@@ -299,6 +299,7 @@ if [ "$SKIP_TEST" = "false" ]; then
     ./.github/scripts/common/87-setup-test-credentials.sh 2>/dev/null || true
 
     export KAGENTI_CONFIG_FILE="deployments/envs/dev_values_openshell.yaml"
+    export OPENSHELL_GATEWAY_NAMESPACE="team1"
 
     if [ "$MAAS_SOURCED" = "true" ]; then
         export OPENSHELL_LLM_AVAILABLE=true

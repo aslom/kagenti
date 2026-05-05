@@ -39,6 +39,10 @@ log_success() { echo -e "${GREEN}✓${NC} $1"; }
 log_warn()    { echo -e "${YELLOW}⚠${NC} $1"; }
 log_error()   { echo -e "${RED}✗${NC} $1"; }
 
+run_cmd() {
+  if $DRY_RUN; then echo "  [dry-run] $*"; else "$@"; fi
+}
+
 usage() {
   cat <<EOF
 Usage: $(basename "$0") <team> [OPTIONS]
