@@ -1,10 +1,11 @@
 """
-OpenShell HITL (Human-In-The-Loop) Policy Tests
+T4.1 HITL Network Policy Tests
 
-Tests that verify OPA policy enforcement for supervised agents.
-Uses kubectl exec into weather-agent-supervised to test egress blocking.
+Tests that OPA policy enforcement blocks unauthorized egress from
+supervised agents. Uses kubectl exec to verify network isolation.
 
-NEW test file — verifies OPA proxy blocks unauthorized egress and logs denials.
+Capability: hitl_network
+Convention: test_hitl_network__{description}[agent]
 """
 
 import os
@@ -17,7 +18,7 @@ from kagenti.tests.e2e.openshell.conftest import kubectl_run
 pytestmark = pytest.mark.openshell
 
 AGENT_NS = os.getenv("OPENSHELL_AGENT_NAMESPACE", "team1")
-SUPERVISED_AGENT = "weather-agent-supervised"
+SUPERVISED_AGENTS = ["weather-agent-supervised"]
 
 
 def _kubectl(*args: str, timeout: int = 30) -> subprocess.CompletedProcess:
@@ -25,35 +26,21 @@ def _kubectl(*args: str, timeout: int = 30) -> subprocess.CompletedProcess:
 
 
 def _deploy_ready(name: str, ns: str = AGENT_NS) -> bool:
-    """Check if deployment has 1 ready replica."""
     r = _kubectl(
         "get", "deploy", name, "-n", ns, "-o", "jsonpath={.status.readyReplicas}"
     )
     return r.returncode == 0 and r.stdout.strip() == "1"
 
 
-skip_no_supervised = pytest.mark.skipif(
-    not _deploy_ready(SUPERVISED_AGENT, AGENT_NS),
-    reason=f"{SUPERVISED_AGENT} not deployed",
-)
+@pytest.mark.parametrize("agent", SUPERVISED_AGENTS)
+class TestHITLNetwork:
+    """Verify OPA policy blocks unauthorized egress from supervised agents."""
 
+    def test_hitl_network__denies_egress(self, agent):
+        """OPA proxy blocks access to unauthorized domain."""
+        if not _deploy_ready(agent):
+            pytest.skip(f"{agent} not deployed")
 
-# ═══════════════════════════════════════════════════════════════════════════
-# HITL Policy Blocking (OPA egress enforcement)
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-class TestHITLPolicyBlocking:
-    """Verify OPA policy blocks unauthorized egress from supervised agent."""
-
-    @skip_no_supervised
-    def test_hitl__opa_denies_unauthorized_egress(self):
-        """OPA proxy must block access to unauthorized domain (e.g., example.com).
-
-        Uses python3 urllib instead of curl (curl not in all agent images).
-        The supervisor's network namespace routes all traffic through the
-        OPA proxy at 10.200.0.1:3128.
-        """
         py_cmd = (
             "import urllib.request, os; "
             "os.environ['http_proxy']='http://10.200.0.1:3128'; "
@@ -62,7 +49,7 @@ class TestHITLPolicyBlocking:
         )
         result = _kubectl(
             "exec",
-            f"deploy/{SUPERVISED_AGENT}",
+            f"deploy/{agent}",
             "-n",
             AGENT_NS,
             "-c",
@@ -84,13 +71,11 @@ class TestHITLPolicyBlocking:
             f"rc={result.returncode} out={result.stdout[:200]} err={result.stderr[:200]}"
         )
 
-    @skip_no_supervised
-    def test_hitl__opa_allows_authorized_egress(self):
-        """OPA proxy must allow access to authorized domain (policy allowlist).
+    def test_hitl_network__allows_egress(self, agent):
+        """OPA proxy allows access to authorized domain (policy allowlist)."""
+        if not _deploy_ready(agent):
+            pytest.skip(f"{agent} not deployed")
 
-        The weather-agent-supervised policy allows *.svc.cluster.local and
-        LiteMaaS endpoints. We test access to the internal cluster DNS.
-        """
         py_cmd = (
             "import urllib.request, os; "
             "os.environ['http_proxy']='http://10.200.0.1:3128'; "
@@ -100,7 +85,7 @@ class TestHITLPolicyBlocking:
         )
         result = _kubectl(
             "exec",
-            f"deploy/{SUPERVISED_AGENT}",
+            f"deploy/{agent}",
             "-n",
             AGENT_NS,
             "-c",
@@ -118,21 +103,19 @@ class TestHITLPolicyBlocking:
         if opa_deny:
             pytest.skip(
                 "OPA denied internal service — supervisor netns DNS may not "
-                "resolve cluster-local names, causing OPA to treat the host "
-                "as unauthorized. TODO: verify netns DNS configuration. "
-                f"out={result.stdout[:200]}"
+                "resolve cluster-local names."
             )
-
         if result.returncode != 0 and "urlopen" in combined:
             pytest.skip(
                 "Internal service unreachable from supervised netns — "
-                "may need DNS resolution fix in supervisor netns. "
-                f"err={result.stderr[:200]}"
+                "may need DNS resolution fix."
             )
 
-    @skip_no_supervised
-    def test_hitl__denial_logged_with_details(self):
-        """OPA denials must be logged in supervisor logs with policy details."""
+    def test_hitl_network__denial_logged(self, agent):
+        """OPA denials are logged in supervisor logs with policy details."""
+        if not _deploy_ready(agent):
+            pytest.skip(f"{agent} not deployed")
+
         py_cmd = (
             "import urllib.request, os; "
             "os.environ['http_proxy']='http://10.200.0.1:3128'; "
@@ -140,7 +123,7 @@ class TestHITLPolicyBlocking:
         )
         _kubectl(
             "exec",
-            f"deploy/{SUPERVISED_AGENT}",
+            f"deploy/{agent}",
             "-n",
             AGENT_NS,
             "-c",
@@ -152,10 +135,9 @@ class TestHITLPolicyBlocking:
             timeout=15,
         )
 
-        # Check supervisor logs for OPA denial
         logs_result = _kubectl(
             "logs",
-            f"deploy/{SUPERVISED_AGENT}",
+            f"deploy/{agent}",
             "-n",
             AGENT_NS,
             "-c",
@@ -164,7 +146,6 @@ class TestHITLPolicyBlocking:
         )
 
         logs_lower = logs_result.stdout.lower()
-        # Look for OPA-related denial markers
         has_opa_log = any(
             kw in logs_lower
             for kw in ["opa:", "policy:", "denied", "blocked", "egress"]
@@ -172,10 +153,7 @@ class TestHITLPolicyBlocking:
 
         if not has_opa_log:
             pytest.skip(
-                "OPA denial not logged (supervisor may log to different stream). "
-                "TODO: Verify OPA logging configuration."
+                "OPA denial not logged (supervisor may log to different stream)."
             )
 
-        assert has_opa_log, (
-            f"OPA denial not logged in supervisor logs. Last 100 lines: {logs_result.stdout[:500]}"
-        )
+        assert has_opa_log

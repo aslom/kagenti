@@ -155,6 +155,7 @@ jobs:
           HCP_ROLE_NAME: ${{ secrets.HCP_ROLE_NAME }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GITHUB_TOKEN: ${{ github.token }}
+          OPENSHELL_LLM_MODELS: "llama-scout-17b,deepseek-r1"
 
       - name: Upload test results
         if: always()

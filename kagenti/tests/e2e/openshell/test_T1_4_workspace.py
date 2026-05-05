@@ -1,12 +1,10 @@
 """
-OpenShell Workspace Persistence Tests
+T1.4 Workspace Tests
 
-Tests PVC-backed workspace state persistence and builtin sandbox creation.
+Tests PVC-backed workspace persistence, sandbox creation, and data survival.
 
-Consolidated from:
-- test_session_persistence.py::TestWorkspacePersistence
-- test_builtin_sandboxes.py::TestBaseSandboxCreation (merged)
-- NEW: TestWorkspaceReadAfterRestart (verify read after restart)
+Capabilities: workspace
+Convention: test_{capability}__{description}[agent]
 """
 
 import os
@@ -60,7 +58,7 @@ skip_no_crd = pytest.mark.skipif(
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-class TestWorkspacePVCPersistence:
+class TestWorkspacePVC:
     """PVC-backed workspace survives sandbox pod restart.
 
     Each builtin sandbox type (generic, Claude, OpenCode) creates a sandbox
@@ -69,9 +67,7 @@ class TestWorkspacePVCPersistence:
 
     @skip_no_crd
     @pytest.mark.parametrize("name, content, path, cmd", ALL_SANDBOX_TYPES)
-    def test_pvc_persistence__sandbox__session_written_to_pvc(
-        self, name, content, path, cmd
-    ):
+    def test_workspace__pvc_written(self, name, content, path, cmd):
         """Create sandbox with PVC, write session data, verify data persisted."""
         pvc = f"{name}-pvc"
         _cleanup_sandbox(name, pvc)
@@ -152,7 +148,7 @@ spec:
         )
 
     @skip_no_crd
-    def test_pvc_persistence__all__pvc_survives_sandbox_deletion(self):
+    def test_workspace__pvc_survives_deletion(self):
         """PVC persists after Sandbox CR deleted — enables session resume."""
         name, pvc = "test-pvc-survive", "test-pvc-survive-pvc"
         _cleanup_sandbox(name, pvc)
@@ -228,11 +224,11 @@ spec:
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-class TestBuiltinSandboxCreation:
+class TestWorkspaceCreation:
     """Verify builtin sandbox images can be created via Sandbox CR."""
 
     @skip_no_crd
-    def test_sandbox_creation__generic__creates_and_runs(self):
+    def test_workspace__creation_generic(self):
         """Generic sandbox creates successfully and pod reaches Running state."""
         name = "test-generic-create"
         pvc = f"{name}-pvc"
@@ -283,7 +279,7 @@ spec:
             )
 
     @skip_no_crd
-    def test_sandbox_creation__claude__creates_with_workspace(self):
+    def test_workspace__creation_claude(self):
         """Claude Code sandbox CR is accepted with PVC workspace mount."""
         name = "test-claude-create"
         pvc = f"{name}-pvc"
@@ -344,7 +340,7 @@ spec:
         assert r.returncode == 0, "Claude sandbox CR not found after creation"
 
     @skip_no_crd
-    def test_sandbox_creation__opencode__creates_with_workspace(self):
+    def test_workspace__creation_opencode(self):
         """OpenCode sandbox CR is accepted with PVC workspace mount."""
         name = "test-opencode-create"
         pvc = f"{name}-pvc"
@@ -410,11 +406,11 @@ spec:
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-class TestWorkspaceReadAfterRestart:
+class TestWorkspacePersistence:
     """Verify workspace data is readable after pod restart (PVC mounted)."""
 
     @skip_no_crd
-    def test_workspace_read__generic__data_persists_after_pod_delete(self):
+    def test_workspace__persists_after_delete(self):
         """Write to PVC, delete pod, wait for recreate, verify data readable."""
         name, pvc = "test-read-after-restart", "test-read-after-restart-pvc"
         path = "/workspace/restart-test.txt"

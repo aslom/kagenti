@@ -9,6 +9,8 @@ Environment variables:
     OPENSHELL_GATEWAY_NAMESPACE: Namespace for the gateway (default: team1)
     OPENSHELL_AGENT_PORT: Agent service port (default: 8080)
     OPENSHELL_LLM_AVAILABLE: Set to "true" if an LLM backend is reachable
+    OPENSHELL_LLM_MODELS: Comma-separated model list for per-model tests
+    OPENSHELL_LLM_PROVIDER: "remote" (LiteMaaS) or "ollama" (local)
 
 Run:
     pytest kagenti/tests/e2e/openshell/ -v -m openshell
@@ -17,6 +19,8 @@ Run:
 import json
 import os
 import subprocess
+import time as _time
+from datetime import datetime, timezone
 
 import httpx
 import pytest
@@ -479,6 +483,147 @@ spec:
     return exec_result.stdout
 
 
+_claude_sandbox_pod: dict[str, str | None] = {}
+
+
+def _ensure_claude_sandbox(namespace: str = "team1") -> str | None:
+    """Ensure a shared Claude Code sandbox pod is running. Returns pod name."""
+    import time
+
+    cache_key = namespace
+    if cache_key in _claude_sandbox_pod:
+        pod_name = _claude_sandbox_pod[cache_key]
+        if pod_name:
+            check = kubectl_run(
+                "get",
+                "pod",
+                pod_name,
+                "-n",
+                namespace,
+                "-o",
+                "jsonpath={.status.phase}",
+            )
+            if check.returncode == 0 and check.stdout.strip() == "Running":
+                return pod_name
+
+    name = "test-claude-shared"
+    litellm_svc = kubectl_run(
+        "get", "svc", "litellm-model-proxy", "-n", namespace, timeout=10
+    )
+    if litellm_svc.returncode != 0:
+        _claude_sandbox_pod[cache_key] = None
+        return None
+
+    litellm_url = f"http://litellm-model-proxy.{namespace}.svc:4000"
+
+    kubectl_run(
+        "delete",
+        "sandbox",
+        name,
+        "-n",
+        namespace,
+        "--ignore-not-found",
+        "--wait=true",
+        timeout=30,
+    )
+    time.sleep(2)
+
+    sandbox_yaml = f"""
+apiVersion: agents.x-k8s.io/v1alpha1
+kind: Sandbox
+metadata:
+  name: {name}
+  namespace: {namespace}
+spec:
+  podTemplate:
+    spec:
+      containers:
+      - name: sandbox
+        image: {BASE_IMAGE}
+        command: ["sleep", "1800"]
+        env:
+        - name: ANTHROPIC_BASE_URL
+          value: "{litellm_url}"
+        - name: ANTHROPIC_AUTH_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: litellm-virtual-keys
+              key: api-key
+"""
+    result = subprocess.run(
+        ["kubectl", "apply", "-f", "-"],
+        input=sandbox_yaml,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if result.returncode != 0:
+        _claude_sandbox_pod[cache_key] = None
+        return None
+
+    deadline = time.time() + 90
+    while time.time() < deadline:
+        pods = kubectl_get_pods_json(namespace)
+        matching = [
+            p
+            for p in pods
+            if name in p["metadata"].get("name", "")
+            and p["status"].get("phase") == "Running"
+        ]
+        if matching:
+            pod_name = matching[0]["metadata"]["name"]
+            _claude_sandbox_pod[cache_key] = pod_name
+            return pod_name
+        time.sleep(5)
+
+    _claude_sandbox_pod[cache_key] = None
+    return None
+
+
+def run_claude_in_sandbox(
+    prompt: str,
+    namespace: str = "team1",
+    timeout_sec: int = 120,
+) -> str | None:
+    """Run Claude Code in a shared sandbox pod via LiteLLM, return output.
+
+    Reuses a single sandbox pod across tests (created on first call).
+    Multiple Claude Code invocations exec into the same pod, avoiding
+    the create/delete race that caused flaky test failures.
+
+    Requires LiteLLM config with:
+    - hosted_vllm/ provider (avoids OpenAI Responses API bridge)
+    - use_chat_completions_url_for_anthropic_messages: true
+    - drop_params: true (Claude Code sends reasoning_effort etc.)
+    - claude-sonnet-4-20250514 model alias
+    """
+    pod_name = _ensure_claude_sandbox(namespace)
+    if not pod_name:
+        return None
+
+    exec_result = kubectl_run(
+        "exec",
+        pod_name,
+        "-n",
+        namespace,
+        "--",
+        "timeout",
+        str(timeout_sec),
+        "claude",
+        "--print",
+        "--bare",
+        "--model",
+        "claude-sonnet-4-20250514",
+        prompt,
+        timeout=timeout_sec + 30,
+    )
+
+    if exec_result.returncode != 0:
+        return None
+
+    return exec_result.stdout
+
+
 # ---------------------------------------------------------------------------
 # Canonical test data (shared across all test files)
 # ---------------------------------------------------------------------------
@@ -545,6 +690,198 @@ LLM_CAPABLE_AGENTS = {
     "nemoclaw-hermes",
     "nemoclaw-openclaw",
 }
+
+# ---------------------------------------------------------------------------
+# Per-model parametrization
+# ---------------------------------------------------------------------------
+
+LLM_MODELS: list[str] = []
+_raw_models = os.getenv("OPENSHELL_LLM_MODELS", "")
+if _raw_models:
+    LLM_MODELS = [m.strip() for m in _raw_models.split(",") if m.strip()]
+
+LLM_PROVIDER = os.getenv("OPENSHELL_LLM_PROVIDER", "remote")
+
+# ---------------------------------------------------------------------------
+# LLM metrics recording
+# ---------------------------------------------------------------------------
+
+_METRICS_FILE = os.path.join(os.getenv("LOG_DIR", "/tmp/kagenti"), "llm-metrics.json")
+
+
+def record_llm_metric(
+    test_name: str,
+    model: str,
+    agent: str,
+    capability: str,
+    status: str,
+    response: dict,
+    duration_s: float,
+    response_text: str = "",
+    keywords: list[str] | None = None,
+):
+    """Record per-model LLM performance metrics to JSONL file."""
+    usage = response.get("usage", {})
+    keywords_found = 0
+    if keywords and response_text:
+        keywords_found = sum(1 for k in keywords if k in response_text.lower())
+
+    metric = {
+        "test": test_name,
+        "model": model,
+        "agent": agent,
+        "capability": capability,
+        "status": status,
+        "tokens_in": usage.get("prompt_tokens", 0),
+        "tokens_out": usage.get("completion_tokens", 0),
+        "tokens_total": usage.get("total_tokens", 0),
+        "duration_s": round(duration_s, 2),
+        "response_length": len(response_text),
+        "keywords_found": keywords_found,
+        "keywords_expected": keywords or [],
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        os.makedirs(os.path.dirname(_METRICS_FILE), exist_ok=True)
+        with open(_METRICS_FILE, "a") as f:
+            f.write(json.dumps(metric) + "\n")
+    except OSError:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Per-model LiteLLM direct call
+# ---------------------------------------------------------------------------
+
+LITELLM_PROXY_URL = "http://litellm-model-proxy.{ns}.svc:4000"
+
+_litellm_port_forward: dict[str, tuple] = {}
+
+
+def _cleanup_litellm_port_forwards():
+    """Kill any leaked port-forward processes on exit."""
+    for _ns, (_, proc) in _litellm_port_forward.items():
+        if proc and proc.poll() is None:
+            proc.terminate()
+            proc.wait()
+    _litellm_port_forward.clear()
+
+
+import atexit
+
+atexit.register(_cleanup_litellm_port_forwards)
+
+
+def _ensure_litellm_port_forward(namespace: str = "team1") -> str | None:
+    """Get a URL to LiteLLM proxy, using port-forward if needed."""
+    if namespace in _litellm_port_forward:
+        url, proc = _litellm_port_forward[namespace]
+        if proc and proc.poll() is None:
+            return url
+
+    url, proc = _port_forward("litellm-model-proxy", namespace, 4000)
+    if url:
+        _litellm_port_forward[namespace] = (url, proc)
+    return url
+
+
+async def litellm_chat(
+    client: httpx.AsyncClient,
+    prompt: str,
+    model: str,
+    namespace: str = "team1",
+    max_tokens: int = 500,
+    timeout: float = 180.0,
+) -> dict:
+    """Call LiteLLM proxy directly with a specific model.
+
+    Uses port-forward to reach the proxy from outside the cluster.
+    Returns the full response dict including usage stats.
+    """
+    base_url = _ensure_litellm_port_forward(namespace)
+    if not base_url:
+        pytest.skip("Cannot port-forward to LiteLLM proxy")
+    resp = await client.post(
+        f"{base_url}/v1/chat/completions",
+        json={
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": max_tokens,
+        },
+        timeout=timeout,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def litellm_chat_text(response: dict) -> str:
+    """Extract text content from a LiteLLM chat completion response."""
+    choices = response.get("choices", [])
+    if not choices:
+        return ""
+    return choices[0].get("message", {}).get("content", "")
+
+
+# ---------------------------------------------------------------------------
+# OpenClaw gateway helper
+# ---------------------------------------------------------------------------
+
+
+async def openclaw_chat(
+    client: httpx.AsyncClient,
+    url: str,
+    prompt: str,
+    model: str = "gpt-4o-mini",
+    timeout: float = 120.0,
+) -> dict | None:
+    """Send a chat completion request through the OpenClaw gateway.
+
+    Tries multiple endpoint patterns since OpenClaw gateway protocol varies
+    by version. Returns None if no chat endpoint is available.
+    """
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 500,
+    }
+    endpoints = [
+        "/v1/chat/completions",
+        "/chat/completions",
+        "/api/chat",
+    ]
+    for endpoint in endpoints:
+        try:
+            resp = await client.post(
+                f"{url}{endpoint}",
+                json=payload,
+                timeout=timeout,
+            )
+            if resp.status_code == 404:
+                continue
+            resp.raise_for_status()
+            return resp.json()
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                continue
+            raise
+        except (httpx.ReadError, httpx.RemoteProtocolError):
+            continue
+
+    # Last resort: POST to root with JSON body
+    try:
+        resp = await client.post(f"{url}/", json=payload, timeout=30.0)
+        if resp.status_code == 200:
+            try:
+                data = resp.json()
+                if "choices" in data or "message" in data or "response" in data:
+                    return data
+            except (ValueError, KeyError):
+                pass
+    except (httpx.HTTPError, httpx.ReadError, httpx.RemoteProtocolError):
+        pass
+
+    return None
+
 
 ALL_SANDBOX_TYPES = [
     pytest.param(

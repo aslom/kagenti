@@ -1,5 +1,5 @@
 """
-NemoClaw agent smoke tests.
+T0.4 — NemoClaw agent infrastructure tests.
 
 Tests the NemoClaw agents (Hermes and OpenClaw) deployed via OpenShell.
 These agents use their own native APIs (not A2A JSON-RPC):
@@ -7,7 +7,7 @@ These agents use their own native APIs (not A2A JSON-RPC):
   - OpenClaw: Gateway API on port 18789
 
 TODO(a2a-adapter): Once A2A adapters are added, move these agents into
-the standard A2A test suite (test_02, test_05, test_07).
+the standard A2A test suite.
 
 TODO(nemoclaw-images): These tests will skip until proper NemoClaw images
 are available. Current deployment uses OpenShell base image which does not
@@ -87,7 +87,12 @@ class TestNemoClawPlatformHealth:
         from kagenti.tests.e2e.openshell.conftest import kubectl_get_pods_json
 
         pods = kubectl_get_pods_json(agent_namespace)
-        matching = [p for p in pods if agent_name in p["metadata"].get("name", "")]
+        matching = [
+            p
+            for p in pods
+            if agent_name in p["metadata"].get("name", "")
+            and p["status"].get("phase") == "Running"
+        ]
         assert len(matching) >= 1
         labels = matching[0]["metadata"].get("labels", {})
         assert labels.get("kagenti.io/framework") == "NemoClaw", (
@@ -198,7 +203,12 @@ class TestNemoClawSecurity:
         from kagenti.tests.e2e.openshell.conftest import kubectl_get_pods_json
 
         pods = kubectl_get_pods_json(agent_namespace)
-        matching = [p for p in pods if agent_name in p["metadata"].get("name", "")]
+        matching = [
+            p
+            for p in pods
+            if agent_name in p["metadata"].get("name", "")
+            and p["status"].get("phase") == "Running"
+        ]
         assert len(matching) >= 1
         labels = matching[0]["metadata"].get("labels", {})
         assert labels.get("kagenti.io/inject") == "disabled"
@@ -209,7 +219,12 @@ class TestNemoClawSecurity:
         from kagenti.tests.e2e.openshell.conftest import kubectl_get_pods_json
 
         pods = kubectl_get_pods_json(agent_namespace)
-        matching = [p for p in pods if agent_name in p["metadata"].get("name", "")]
+        matching = [
+            p
+            for p in pods
+            if agent_name in p["metadata"].get("name", "")
+            and p["status"].get("phase") == "Running"
+        ]
         assert len(matching) >= 1
 
         for container in matching[0]["spec"]["containers"]:
@@ -224,7 +239,12 @@ class TestNemoClawSecurity:
         from kagenti.tests.e2e.openshell.conftest import kubectl_get_pods_json
 
         pods = kubectl_get_pods_json(agent_namespace)
-        matching = [p for p in pods if agent_name in p["metadata"].get("name", "")]
+        matching = [
+            p
+            for p in pods
+            if agent_name in p["metadata"].get("name", "")
+            and p["status"].get("phase") == "Running"
+        ]
         assert len(matching) >= 1
 
         for container in matching[0]["spec"]["containers"]:
@@ -240,7 +260,12 @@ class TestNemoClawSecurity:
         from kagenti.tests.e2e.openshell.conftest import kubectl_get_pods_json
 
         pods = kubectl_get_pods_json(agent_namespace)
-        matching = [p for p in pods if agent_name in p["metadata"].get("name", "")]
+        matching = [
+            p
+            for p in pods
+            if agent_name in p["metadata"].get("name", "")
+            and p["status"].get("phase") == "Running"
+        ]
         assert len(matching) >= 1
 
         for container in matching[0]["spec"]["containers"]:

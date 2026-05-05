@@ -1,13 +1,10 @@
 """
-Tests for OpenShell sandbox lifecycle via Kubernetes API.
+T1.3 Sandbox Lifecycle Tests
 
-Tests create, list, and delete Sandbox CRs (agents.x-k8s.io/v1alpha1)
-to verify the OpenShell gateway processes them correctly.
+Tests sandbox CRUD, gateway processing, and status observability.
 
-Also covers the proposal's validation criteria that are adapted for the
-A2A-first agent model:
-- Sandbox status observability (A2A equivalent of ``openshell term``)
-- Agent service persistence (A2A equivalent of session reconnect)
+Capabilities: sandbox_lifecycle
+Convention: test_{capability}__{description}[agent]
 """
 
 import json
@@ -47,7 +44,7 @@ class TestSandboxLifecycle:
     """Test sandbox CRUD via Kubernetes Sandbox CR API."""
 
     @skip_no_crd
-    def test_list_sandboxes(self):
+    def test_sandbox_lifecycle__list(self):
         """List Sandbox CRs — should succeed even if none exist."""
         result = _kubectl(
             "get",
@@ -62,7 +59,7 @@ class TestSandboxLifecycle:
         assert "items" in data
 
     @skip_no_crd
-    def test_create_sandbox(self):
+    def test_sandbox_lifecycle__create(self):
         """Create a Sandbox CR and verify the gateway picks it up."""
         # Clean up first
         _kubectl("delete", "sandbox", SANDBOX_NAME, "-n", SANDBOX_NS)
@@ -115,7 +112,7 @@ spec:
             )
 
     @skip_no_crd
-    def test_delete_sandbox(self):
+    def test_sandbox_lifecycle__delete(self):
         """Create then delete a sandbox CR — self-contained."""
         delete_name = "test-sandbox-delete"
         _kubectl(

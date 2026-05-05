@@ -1,7 +1,7 @@
 """
-OpenShell Supervisor Enforcement Tests
+T0.3 — OpenShell supervisor enforcement infrastructure tests.
 
-Tests that verify the supervisor ACTUALLY enforces isolation:
+Verifies that the supervisor ACTUALLY enforces isolation:
 - Landlock blocks filesystem writes outside allowed paths
 - Network namespace isolates the agent from direct external access
 - OPA proxy is the only network exit point

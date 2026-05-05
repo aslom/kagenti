@@ -1,11 +1,8 @@
 """
-OpenShell Platform Health E2E Tests
+T0.1 — OpenShell platform health infrastructure tests.
 
 Verifies that the OpenShell gateway, Kagenti operator, and all OpenShell
 agents have healthy pods running in their respective namespaces.
-
-Usage:
-    pytest kagenti/tests/e2e/openshell/test_platform_health.py -v -m openshell
 """
 
 import subprocess
