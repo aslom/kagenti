@@ -17,25 +17,6 @@ enforcement.
 Download the latest release for your platform from
 <https://github.com/kagenti/OpenShell/releases>:
 
-```bash
-# macOS (Apple Silicon)
-curl -L -o openshell \
-  https://github.com/kagenti/OpenShell/releases/latest/download/openshell-darwin-arm64
-chmod +x openshell
-sudo mv openshell /usr/local/bin/
-
-# macOS (Intel)
-curl -L -o openshell \
-  https://github.com/kagenti/OpenShell/releases/latest/download/openshell-darwin-amd64
-chmod +x openshell
-sudo mv openshell /usr/local/bin/
-
-# Linux (x86_64)
-curl -L -o openshell \
-  https://github.com/kagenti/OpenShell/releases/latest/download/openshell-linux-amd64
-chmod +x openshell
-sudo mv openshell /usr/local/bin/
-```
 
 Verify the installation:
 
@@ -54,7 +35,7 @@ Choose the section that matches your target environment.
 #### Step 1: Deploy Kagenti on Kind
 
 ```bash
-./.github/scripts/local-setup/kind-full-test.sh --skip-cluster-destroy
+scripts/kind/setup-kagenti.sh  --with-all
 ```
 
 This deploys: Kind cluster, Istio ambient mesh, cert-manager, Keycloak, SPIRE,
