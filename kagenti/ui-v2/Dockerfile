@@ -16,7 +16,7 @@ RUN npm install --legacy-peer-deps
 COPY ui-v2/ .
 
 ARG RELEASE_TAG=unknown
-RUN sed -i -r 's/"version": (.*)/"version": "'${RELEASE_TAG}'",/' package.json
+RUN sed -i -r 's/^\ \ "version": (.*)/"version": "'${RELEASE_TAG}'",/' package.json
 
 # Build the application
 RUN npm run build

@@ -6,7 +6,7 @@ lint:
 KIND_CLUSTER_NAME := kagenti
 # Generate unique tag using git commit hash (short) or timestamp if not in git repo
 TAG := $(shell git rev-parse --short HEAD 2>/dev/null | xargs -I {} sh -c 'echo "{}-$$(date +%s)"' || date +%s)
-RELEASE_TAG := $(shell git describe --tags --abbrev=0)
+RELEASE_TAG := $(shell git describe --tags --abbrev=0 2>/dev/null || echo "unknown")
 
 # Agent OAuth Secret
 AGENT_OAUTH_SECRET_IMAGE := agent-oauth-secret
