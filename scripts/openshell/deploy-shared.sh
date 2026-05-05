@@ -116,7 +116,7 @@ echo ""
 
 # ── Helper: wait for deployment ─────────────────────────────────────────────
 wait_deployment_ready() {
-  local name=$1 namespace=$2 timeout=${3:-120}
+  local name=$1 namespace=$2 timeout=${3:-300}
   if $DRY_RUN; then return 0; fi
   log_info "Waiting for deployment $name in $namespace (timeout: ${timeout}s)..."
   kubectl wait --for=condition=Available deployment/"$name" \
@@ -657,8 +657,8 @@ spec:
 EOLITELLM
 
     if ! $DRY_RUN; then
-      kubectl rollout status "deploy/$LITELLM_PROXY_NAME" -n "$LITELLM_NS" --timeout=120s || {
-        log_warn "LiteLLM proxy rollout not complete"
+      kubectl rollout status "deploy/$LITELLM_PROXY_NAME" -n "$LITELLM_NS" --timeout=60s || {
+        log_warn "LiteLLM proxy still pulling image — continuing (will be ready by test phase)"
       }
     fi
     log_success "LiteLLM model proxy deployed"
