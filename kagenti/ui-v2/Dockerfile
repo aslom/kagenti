@@ -15,6 +15,10 @@ RUN npm install --legacy-peer-deps
 # Copy source code
 COPY ui-v2/ .
 
+# Make the NPM version of the package the same as the GitHub tag
+RUN LATEST_TAG=$(git describe --tags --abbrev=0|| echo "unknown") && \
+  sed -i -r 's/"version": (.*)/"version": "'${LATEST_TAG}'",/' package.json
+
 # Build the application
 RUN npm run build
 
