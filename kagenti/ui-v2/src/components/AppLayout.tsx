@@ -238,7 +238,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children, features }) => {
           Kagenti
         </MastheadBrand>
         <span style={{ fontSize: '0.75rem', color: 'white', marginLeft: '0.5rem' }}>
-          v{packageJson.version}
+          {packageJson.version}
         </span>
       </MastheadMain>
       <MastheadContent>
