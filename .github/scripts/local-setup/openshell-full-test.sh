@@ -203,6 +203,22 @@ if [ "$SKIP_CREATE" = "false" ]; then
     else
         log_phase "PHASE 1: Create HyperShift Cluster"
         export KUBECONFIG="${MGMT_KUBECONFIG:-$HOME/.kube/kagenti-team-mgmt.kubeconfig}"
+
+        # Clean up stale cluster from cancelled/failed CI runs
+        if [ -n "${HCP_CLUSTER_NAME:-}" ]; then
+            STALE_NS="clusters-$HCP_CLUSTER_NAME"
+            if kubectl get ns "$STALE_NS" &>/dev/null; then
+                log_warn "Stale namespace $STALE_NS found — cleaning up before create"
+                if [ -x "./.github/scripts/hypershift/ci/55-cleanup-existing-cluster.sh" ]; then
+                    CLUSTER_SUFFIX="$CLUSTER_SUFFIX" \
+                        ./.github/scripts/hypershift/ci/55-cleanup-existing-cluster.sh || true
+                else
+                    kubectl delete ns "$STALE_NS" --wait=false 2>/dev/null || true
+                    sleep 15
+                fi
+            fi
+        fi
+
         ./.github/scripts/hypershift/create-cluster.sh "$CLUSTER_SUFFIX"
         export KUBECONFIG="$HOSTED_KUBECONFIG"
         log_step "Switched to hosted cluster: $KUBECONFIG"
