@@ -277,3 +277,4 @@ fi
 log_success "Test credentials ready"
 log_info "  Test user: $TEST_USER (realm: $REALM)"
 log_info "  Service account: $E2E_CLIENT_ID"
+log_info "  Run ./.github/scripts/local-setup/show-services.sh to see login credentials"
