@@ -7,10 +7,11 @@ FROM node:25-alpine@sha256:ad82ecad30371c43f4057aaa4800a8ed88f9446553a2d21323710
 WORKDIR /app
 
 # Copy package files
-COPY ui-v2/package.json ./
+COPY ui-v2/package.json ui-v2/package-lock.json ./
 
-# Install dependencies
-RUN npm install --legacy-peer-deps
+# Install dependencies (locked via package-lock.json)
+# hadolint ignore=DL3016
+RUN npm ci --legacy-peer-deps
 
 # Copy source code
 COPY ui-v2/ .
