@@ -161,9 +161,9 @@ spec:
         """Verify the gateway logs show it processed a sandbox event."""
         result = _kubectl(
             "logs",
-            "openshell-gateway-0",
+            "openshell-server-0",
             "-n",
-            "openshell-system",
+            GATEWAY_NS,
             "--tail=50",
         )
         assert result.returncode == 0
@@ -173,7 +173,7 @@ spec:
 
 
 AGENT_NS = os.getenv("OPENSHELL_AGENT_NAMESPACE", "team1")
-GATEWAY_NS = os.getenv("OPENSHELL_GATEWAY_NAMESPACE", "openshell-system")
+GATEWAY_NS = os.getenv("OPENSHELL_GATEWAY_NAMESPACE", "team1")
 
 
 class TestSandboxStatusObservability:
@@ -192,7 +192,7 @@ class TestSandboxStatusObservability:
         result = _kubectl(
             "get",
             "statefulset",
-            "openshell-gateway",
+            "openshell-server",
             "-n",
             GATEWAY_NS,
             "-o",
@@ -279,7 +279,7 @@ class TestSandboxStatusObservability:
         """Gateway logs are accessible for debugging and audit."""
         result = _kubectl(
             "logs",
-            "openshell-gateway-0",
+            "openshell-server-0",
             "-n",
             GATEWAY_NS,
             "--tail=20",

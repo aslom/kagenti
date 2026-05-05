@@ -6,7 +6,7 @@ configuration for the OpenShell PoC agents.
 
 Environment variables:
     OPENSHELL_AGENT_NAMESPACE: Namespace where agents are deployed (default: team1)
-    OPENSHELL_GATEWAY_NAMESPACE: Namespace for the gateway (default: openshell-system)
+    OPENSHELL_GATEWAY_NAMESPACE: Namespace for the gateway (default: team1)
     OPENSHELL_AGENT_PORT: Agent service port (default: 8080)
     OPENSHELL_LLM_AVAILABLE: Set to "true" if an LLM backend is reachable
 
@@ -49,7 +49,7 @@ def agent_namespace():
 @pytest.fixture(scope="session")
 def gateway_namespace():
     """Namespace where the OpenShell gateway runs."""
-    return os.getenv("OPENSHELL_GATEWAY_NAMESPACE", "openshell-system")
+    return os.getenv("OPENSHELL_GATEWAY_NAMESPACE", "team1")
 
 
 @pytest.fixture(scope="session")

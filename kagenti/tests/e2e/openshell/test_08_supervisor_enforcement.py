@@ -25,7 +25,7 @@ from kagenti.tests.e2e.openshell.conftest import a2a_send, extract_a2a_text
 
 pytestmark = [pytest.mark.openshell]
 
-GATEWAY_NS = os.getenv("OPENSHELL_GATEWAY_NAMESPACE", "openshell-system")
+GATEWAY_NS = os.getenv("OPENSHELL_GATEWAY_NAMESPACE", "team1")
 AGENT_NS = os.getenv("OPENSHELL_AGENT_NAMESPACE", "team1")
 SUPERVISED_AGENT = "weather-agent-supervised"
 

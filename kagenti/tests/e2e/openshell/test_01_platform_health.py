@@ -22,17 +22,17 @@ pytestmark = pytest.mark.openshell
 
 
 class TestOpenShellGateway:
-    """Verify the OpenShell Gateway is running in openshell-system."""
+    """Verify the OpenShell Gateway is running in the gateway namespace."""
 
     def test_gateway_pod_running(self, gateway_namespace):
-        """At least one openshell-gateway pod must be Running."""
+        """At least one openshell-server pod must be Running."""
         pods = kubectl_get_pods_json(gateway_namespace)
         gateway_pods = [
-            p for p in pods if p["metadata"]["name"].startswith("openshell-gateway")
+            p for p in pods if p["metadata"]["name"].startswith("openshell-server")
         ]
 
         assert len(gateway_pods) > 0, (
-            f"No openshell-gateway pods found in {gateway_namespace}"
+            f"No openshell-server pods found in {gateway_namespace}"
         )
 
         for pod in gateway_pods:
@@ -46,10 +46,10 @@ class TestOpenShellGateway:
         """All containers in the gateway pod must be ready."""
         pods = kubectl_get_pods_json(gateway_namespace)
         gateway_pods = [
-            p for p in pods if p["metadata"]["name"].startswith("openshell-gateway")
+            p for p in pods if p["metadata"]["name"].startswith("openshell-server")
         ]
 
-        assert len(gateway_pods) > 0, "No openshell-gateway pods found"
+        assert len(gateway_pods) > 0, "No openshell-server pods found"
 
         for pod in gateway_pods:
             name = pod["metadata"]["name"]
