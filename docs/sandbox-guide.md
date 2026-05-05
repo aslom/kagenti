@@ -102,21 +102,13 @@ After installation, continue with [Configure the CLI](#configure-the-cli) below.
 Point the CLI at your tenant gateway:
 
 ```bash
-# Kind
 scripts/openshell/configure-cli.sh team1
-
-# OpenShift — use the route hostname for your tenant
-openshell gateway add \
-  --name team1 \
-  --url https://openshell-team1.<cluster-domain> \
-  --ca-cert /path/to/ca.crt \
-  --client-cert /path/to/tls.crt \
-  --client-key /path/to/tls.key
 ```
 
-On Kind, the `configure-cli.sh` script extracts certificates from the cluster
-automatically. On OpenShift, retrieve the certificates from the
-`openshell-client-cert` secret in the tenant namespace.
+The script auto-detects the platform (Kind or OpenShift), registers the gateway
+with the correct endpoint and OIDC issuer, and extracts mTLS certificates from
+the cluster (`openshell-server-tls` and `openshell-client-tls` secrets in the
+tenant namespace).
 
 ## Log In
 
@@ -143,7 +135,12 @@ export ANTHROPIC_AUTH_TOKEN="your-api-key-here"
 
 openshell provider create --name claude --type anthropic \
   --credential ANTHROPIC_AUTH_TOKEN \
-  --config ANTHROPIC_BASE_URL=https://your-litellm-proxy.example.com
+  --config ANTHROPIC_BASE_URL=<your llm provider URL>
+
+# for example
+openshell provider create --name claude --type anthropic \
+  --credential ANTHROPIC_AUTH_TOKEN \
+  --config ANTHROPIC_BASE_URL=https://ete-litellm.bx.cloud9.ibm.com 
 ```
 
 Key points:
@@ -168,6 +165,9 @@ sandbox to the upstream LLM endpoint.
 ```bash
 openshell sandbox create --provider claude --no-auto-providers -- claude
 ```
+**Note**: The community NVIDIA sandbox image is quite large. On first use, 
+Kubernetes may take a few minutes to download the image and start the sandbox.
+
 
 Flags:
 
