@@ -3,6 +3,9 @@
 Standard Operating Procedure for releasing Kagenti, aligned with CNCF project
 conventions (Kubernetes, Helm, ArgoCD).
 
+> **Related:** [docs/releasing.md](releasing.md) contains the procedural step-by-step
+> instructions. This document covers policy and governance.
+
 ---
 
 ## 1. Branching Strategy
@@ -177,8 +180,7 @@ Kagenti spans multiple repositories. Tags must be created in dependency order:
 ```
 1. kagenti/kagenti-operator      →  tag, wait for CI
 2. kagenti/kagenti-extensions    →  tag, wait for CI
-3. kagenti/agent-examples        →  tag (if applicable)
-4. kagenti/kagenti               →  update Chart.yaml + values.yaml, tag
+3. kagenti/kagenti               →  update Chart.yaml + values.yaml, tag
 ```
 
 **Between each step:** Verify container images and Helm charts are published before proceeding to the next repository.
@@ -230,8 +232,10 @@ jobs:
             exit 1
           fi
       - name: Chart.yaml versions are not -alpha on release branches
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
-          if echo "${{ github.base_ref }}" | grep -q 'release-' && \
+          if echo "$BASE_REF" | grep -q 'release-' && \
              grep -q 'alpha' charts/kagenti/Chart.yaml; then
             echo "::warning::Chart.yaml references alpha dependencies on a release branch"
           fi
@@ -244,7 +248,7 @@ jobs:
 ### Alpha
 
 - [ ] CI green on `main`
-- [ ] Tag dependency repos in order (operator → extensions → examples)
+- [ ] Tag dependency repos in order (operator → extensions)
 - [ ] Verify images/charts published for each
 - [ ] Update `Chart.yaml` + `values.yaml` in `kagenti/kagenti`
 - [ ] Pin all image tags (no `latest`)

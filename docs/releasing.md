@@ -3,6 +3,9 @@
 This guide describes how maintainers create tags, pre-releases, and stable (GA)
 releases across the Kagenti organization.
 
+> **Policy:** For branching strategy, support windows, and governance decisions,
+> see [docs/release-sop.md](release-sop.md).
+
 > **AI-assisted releases:** Use the `/release` skill to walk through the release
 > process interactively. See [Using the Release Skill](#using-the-release-skill)
 > at the end of this guide for examples.
