@@ -504,6 +504,8 @@ if $STEP_LITELLM; then
   LITELLM_NS="${LITELLM_NS:-team1}"
   LITELLM_PROXY_NAME="litellm-model-proxy"
 
+  DEEPSEEK_MODEL="${MAAS_DEEPSEEK_MODEL:-deepseek-r1-distill-qwen-14b}"
+
   if [[ -z "$LITEMAAS_KEY" ]]; then
     log_warn "MAAS_LLAMA4_API_KEY not set — skipping LiteLLM proxy"
   elif kubectl get deployment "$LITELLM_PROXY_NAME" -n "$LITELLM_NS" &>/dev/null \
@@ -513,6 +515,17 @@ if $STEP_LITELLM; then
     log_info "Deploying LiteLLM model proxy in namespace $LITELLM_NS..."
     kubectl get ns "$LITELLM_NS" &>/dev/null || run_cmd kubectl create ns "$LITELLM_NS"
 
+    # Store API key in a Secret (not plaintext in ConfigMap)
+    kubectl create secret generic litemaas-credentials -n "$LITELLM_NS" \
+        --from-literal=api-key="$LITEMAAS_KEY" \
+        --dry-run=client -o yaml | kubectl apply -f -
+
+    # Also create litellm-virtual-keys for sandbox agents
+    kubectl create secret generic litellm-virtual-keys -n "$LITELLM_NS" \
+        --from-literal=api-key="$LITEMAAS_KEY" \
+        --dry-run=client -o yaml | kubectl apply -f -
+
+    # hosted_vllm/ provider avoids LiteLLM's OpenAI Responses API bridge
     run_cmd kubectl apply -f - <<EOLITELLM
 apiVersion: v1
 kind: ConfigMap
@@ -521,49 +534,60 @@ metadata:
   namespace: $LITELLM_NS
 data:
   config.yaml: |
+    litellm_settings:
+      drop_params: true
+      use_chat_completions_url_for_anthropic_messages: true
     model_list:
       - model_name: "gpt-4o-mini"
         litellm_params:
-          model: "openai/$LITEMAAS_MODEL"
+          model: "hosted_vllm/$LITEMAAS_MODEL"
           api_base: "$LITEMAAS_URL"
-          api_key: "$LITEMAAS_KEY"
-          use_chat_completions_api: true
+          api_key: "os.environ/LITEMAAS_API_KEY"
       - model_name: "gpt-4o"
         litellm_params:
-          model: "openai/$LITEMAAS_MODEL"
+          model: "hosted_vllm/$LITEMAAS_MODEL"
           api_base: "$LITEMAAS_URL"
-          api_key: "$LITEMAAS_KEY"
-          use_chat_completions_api: true
+          api_key: "os.environ/LITEMAAS_API_KEY"
       - model_name: "gpt-4"
         litellm_params:
-          model: "openai/$LITEMAAS_MODEL"
+          model: "hosted_vllm/$LITEMAAS_MODEL"
           api_base: "$LITEMAAS_URL"
-          api_key: "$LITEMAAS_KEY"
-          use_chat_completions_api: true
+          api_key: "os.environ/LITEMAAS_API_KEY"
       - model_name: "gpt-5-nano"
         litellm_params:
-          model: "openai/$LITEMAAS_MODEL"
+          model: "hosted_vllm/$LITEMAAS_MODEL"
           api_base: "$LITEMAAS_URL"
-          api_key: "$LITEMAAS_KEY"
-          use_chat_completions_api: true
+          api_key: "os.environ/LITEMAAS_API_KEY"
       - model_name: "gpt-5"
         litellm_params:
-          model: "openai/$LITEMAAS_MODEL"
+          model: "hosted_vllm/$LITEMAAS_MODEL"
           api_base: "$LITEMAAS_URL"
-          api_key: "$LITEMAAS_KEY"
-          use_chat_completions_api: true
+          api_key: "os.environ/LITEMAAS_API_KEY"
       - model_name: "gpt-5-mini"
         litellm_params:
-          model: "openai/$LITEMAAS_MODEL"
+          model: "hosted_vllm/$LITEMAAS_MODEL"
           api_base: "$LITEMAAS_URL"
-          api_key: "$LITEMAAS_KEY"
-          use_chat_completions_api: true
+          api_key: "os.environ/LITEMAAS_API_KEY"
       - model_name: "$LITEMAAS_MODEL"
         litellm_params:
-          model: "openai/$LITEMAAS_MODEL"
+          model: "hosted_vllm/$LITEMAAS_MODEL"
           api_base: "$LITEMAAS_URL"
-          api_key: "$LITEMAAS_KEY"
-          use_chat_completions_api: true
+          api_key: "os.environ/LITEMAAS_API_KEY"
+      - model_name: "claude-sonnet-4-20250514"
+        litellm_params:
+          model: "hosted_vllm/$LITEMAAS_MODEL"
+          api_base: "$LITEMAAS_URL"
+          api_key: "os.environ/LITEMAAS_API_KEY"
+      - model_name: "claude-haiku-4-20250414"
+        litellm_params:
+          model: "hosted_vllm/$LITEMAAS_MODEL"
+          api_base: "$LITEMAAS_URL"
+          api_key: "os.environ/LITEMAAS_API_KEY"
+      - model_name: "deepseek-r1"
+        litellm_params:
+          model: "hosted_vllm/$DEEPSEEK_MODEL"
+          api_base: "$LITEMAAS_URL"
+          api_key: "os.environ/LITEMAAS_API_KEY"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -590,6 +614,12 @@ spec:
         ports:
         - containerPort: 4000
           name: http
+        env:
+        - name: LITEMAAS_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: litemaas-credentials
+              key: api-key
         resources:
           requests:
             cpu: 100m
