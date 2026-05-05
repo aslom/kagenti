@@ -110,6 +110,45 @@ with the correct endpoint and OIDC issuer, and extracts mTLS certificates from
 the cluster (`openshell-server-tls` and `openshell-client-tls` secrets in the
 tenant namespace).
 
+### OpenShift with Self-Signed Certificates
+
+If your OpenShift cluster uses a self-signed or private CA (common in
+disconnected or lab environments), the CLI will reject the gateway's TLS
+certificate with an `UnknownIssuer` error. You need to trust the cluster's
+ingress CA on your local machine.
+
+Extract the OpenShift ingress CA:
+
+```bash
+# Get the default ingress CA bundle
+oc get secret router-ca -n openshift-ingress-operator \
+  -o jsonpath='{.data.tls\.crt}' | base64 -d > /tmp/ocp-ingress-ca.crt
+```
+
+Then trust it at the system level:
+
+```bash
+# macOS
+sudo security add-trusted-cert -d -r trustRoot \
+  -k /Library/Keychains/System.keychain /tmp/ocp-ingress-ca.crt
+
+# Linux (RHEL/Fedora)
+sudo cp /tmp/ocp-ingress-ca.crt /etc/pki/ca-trust/source/anchors/ocp-ingress-ca.crt
+sudo update-ca-trust
+
+# Linux (Debian/Ubuntu)
+sudo cp /tmp/ocp-ingress-ca.crt /usr/local/share/ca-certificates/ocp-ingress-ca.crt
+sudo update-ca-certificates
+```
+
+Alternatively, if you prefer not to modify system trust, set the
+`SSL_CERT_FILE` environment variable before running CLI commands:
+
+```bash
+export SSL_CERT_FILE=/tmp/ocp-ingress-ca.crt
+openshell gateway login
+```
+
 ## Log In
 
 ```bash
