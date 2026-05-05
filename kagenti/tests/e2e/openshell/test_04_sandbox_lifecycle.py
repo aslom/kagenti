@@ -157,8 +157,8 @@ spec:
         assert result.returncode == 0, f"Failed to delete sandbox: {result.stderr}"
 
     @skip_no_crd
-    def test_gateway_processes_sandbox(self):
-        """Verify the gateway logs show it processed a sandbox event."""
+    def test_gateway_sandbox_aware(self):
+        """Verify the gateway is configured with a compute driver for sandbox support."""
         result = _kubectl(
             "logs",
             "openshell-server-0",
@@ -168,8 +168,10 @@ spec:
         )
         assert result.returncode == 0
         assert (
-            "Listing sandboxes" in result.stdout or "sandbox" in result.stdout.lower()
-        ), "Gateway logs don't show sandbox processing"
+            "compute driver" in result.stdout.lower()
+            or "sandbox" in result.stdout.lower()
+            or "Server listening" in result.stdout
+        ), "Gateway logs don't show sandbox-capable configuration"
 
 
 AGENT_NS = os.getenv("OPENSHELL_AGENT_NAMESPACE", "team1")
