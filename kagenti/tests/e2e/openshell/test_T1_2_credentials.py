@@ -16,6 +16,9 @@ import subprocess
 import pytest
 
 from kagenti.tests.e2e.openshell.conftest import (
+    ALL_AGENT_NAMES,
+    A2A_AGENT_NAMES,
+    NEMOCLAW_AGENT_NAMES,
     kubectl_get_pods_json,
     nemoclaw_enabled,
     sandbox_crd_installed,
@@ -24,16 +27,9 @@ from kagenti.tests.e2e.openshell.conftest import (
 
 pytestmark = pytest.mark.openshell
 
-_AGENTS = [
-    "adk-agent-supervised",
-    "claude-sdk-agent",
-    "weather-agent-supervised",
-]
-
-# Agents that use LLM and have API key secrets
-_LLM_AGENTS = ["adk-agent-supervised", "claude-sdk-agent"]
-
-_NEMOCLAW_AGENTS = ["nemoclaw-hermes", "nemoclaw-openclaw"]
+_AGENTS = ALL_AGENT_NAMES
+_LLM_AGENTS = A2A_AGENT_NAMES
+_NEMOCLAW_AGENTS = NEMOCLAW_AGENT_NAMES
 
 skip_no_nemoclaw = pytest.mark.skipif(
     not nemoclaw_enabled(), reason="NemoClaw tests disabled"

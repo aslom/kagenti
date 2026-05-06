@@ -15,6 +15,8 @@ import pytest
 
 from kagenti.tests.e2e.openshell.conftest import (
     a2a_send,
+    A2A_AGENT_NAMES,
+    EXEC_AGENT_NAMES,
     FIXTURE_MAP,
     LLM_CAPABLE_AGENTS,
     NEMOCLAW_AGENT_CONFIG,
@@ -30,8 +32,8 @@ pytestmark = pytest.mark.openshell
 LLM_AVAILABLE = os.getenv("OPENSHELL_LLM_AVAILABLE", "").lower() == "true"
 AGENT_NS = os.getenv("OPENSHELL_AGENT_NAMESPACE", "team1")
 
-A2A_AGENTS = ["adk-agent-supervised", "claude-sdk-agent"]
-EXEC_AGENTS = ["weather-agent-supervised"]
+A2A_AGENTS = A2A_AGENT_NAMES
+EXEC_AGENTS = EXEC_AGENT_NAMES
 
 
 def _url(agent: str, request):

@@ -667,29 +667,64 @@ CANONICAL_CI_LOG = """
 """
 
 # ---------------------------------------------------------------------------
-# Agent registry — defines ALL agents and their properties
-# ---------------------------------------------------------------------------
+# ═══════════════════════════════════════════════════════════════════════════
+# Agent Registry — single source of truth for all test parametrization
+# ═══════════════════════════════════════════════════════════════════════════
 
-ALL_A2A_AGENTS = [
+# A2A agents — speak A2A JSON-RPC, reachable via port-forward
+A2A_AGENTS = [
     pytest.param("claude-sdk-agent", id="claude_sdk_agent"),
     pytest.param("adk-agent-supervised", id="adk_supervised"),
+]
+
+# Exec-only agents — reachable via kubectl exec (netns blocks port-forward)
+EXEC_AGENTS = [
     pytest.param("weather-agent-supervised", id="weather_supervised"),
 ]
 
-# NemoClaw agents — OpenAI-compatible (hermes) and gateway (openclaw) APIs.
-# These do NOT speak A2A JSON-RPC; they have their own native APIs.
-# TODO(a2a-adapter): Wrap with A2A adapter so they join ALL_A2A_AGENTS.
+# All supervised/A2A agents (union of A2A + exec)
+ALL_A2A_AGENTS = A2A_AGENTS + EXEC_AGENTS
+
+# NemoClaw agents — own protocols, NOT A2A
 NEMOCLAW_AGENTS = [
     pytest.param("nemoclaw-hermes", id="nemoclaw_hermes"),
     pytest.param("nemoclaw-openclaw", id="nemoclaw_openclaw"),
 ]
 
+# All deployed agents (A2A + NemoClaw)
+ALL_DEPLOYED_AGENTS = ALL_A2A_AGENTS + NEMOCLAW_AGENTS
+
+# Plain string lists (for non-parametrized lookups)
+A2A_AGENT_NAMES = ["claude-sdk-agent", "adk-agent-supervised"]
+EXEC_AGENT_NAMES = ["weather-agent-supervised"]
+ALL_AGENT_NAMES = A2A_AGENT_NAMES + EXEC_AGENT_NAMES
+NEMOCLAW_AGENT_NAMES = ["nemoclaw-hermes", "nemoclaw-openclaw"]
+ALL_DEPLOYED_AGENT_NAMES = ALL_AGENT_NAMES + NEMOCLAW_AGENT_NAMES
+
+# Agents with LLM capability (can execute skills)
 LLM_CAPABLE_AGENTS = {
     "adk-agent-supervised",
     "claude-sdk-agent",
     "nemoclaw-hermes",
     "nemoclaw-openclaw",
 }
+
+# CLI agents — accessed via kubectl exec into sandbox pods (not A2A)
+CLI_AGENTS = [
+    pytest.param("openshell-claude", id="openshell_claude"),
+    pytest.param("openshell-opencode", id="openshell_opencode"),
+]
+CLI_AGENT_NAMES = ["openshell-claude", "openshell-opencode"]
+
+# All agents (full test matrix)
+ALL_AGENTS = ALL_DEPLOYED_AGENTS + CLI_AGENTS
+ALL_AGENT_NAMES_FULL = ALL_DEPLOYED_AGENT_NAMES + CLI_AGENT_NAMES
+
+# Agents without LLM (skip skill tests)
+NO_LLM_AGENTS = {"weather-agent-supervised"}
+
+# Agents without agent CLI (skip skill/tool tests)
+NO_AGENT_CLI = {"openshell-generic"}
 
 # ---------------------------------------------------------------------------
 # Per-model parametrization

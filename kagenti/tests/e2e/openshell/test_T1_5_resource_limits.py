@@ -13,6 +13,8 @@ import os
 import pytest
 
 from kagenti.tests.e2e.openshell.conftest import (
+    ALL_AGENT_NAMES,
+    NEMOCLAW_AGENT_NAMES,
     kubectl_get_pods_json,
     kubectl_run,
     nemoclaw_enabled,
@@ -28,12 +30,12 @@ skip_no_crd = pytest.mark.skipif(
     not sandbox_crd_installed(), reason="Sandbox CRD not installed"
 )
 
-A2A_AGENTS = ["claude-sdk-agent", "adk-agent-supervised", "weather-agent-supervised"]
+A2A_AGENTS = ALL_AGENT_NAMES
 
 skip_no_nemoclaw = pytest.mark.skipif(
     not nemoclaw_enabled(), reason="NemoClaw tests disabled"
 )
-NEMOCLAW_AGENTS = ["nemoclaw-hermes", "nemoclaw-openclaw"]
+NEMOCLAW_AGENTS = NEMOCLAW_AGENT_NAMES
 
 
 class TestAgentResourceLimits:

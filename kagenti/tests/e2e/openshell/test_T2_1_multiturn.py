@@ -19,6 +19,7 @@ from kagenti.tests.e2e.openshell.conftest import (
     nemoclaw_enabled,
     sandbox_crd_installed,
     AGENT_PROMPTS,
+    ALL_A2A_AGENTS,
     FIXTURE_MAP,
     LLM_CAPABLE_AGENTS,
     kubectl_run,
@@ -44,11 +45,7 @@ def _deploy_ready(name: str, ns: str = AGENT_NS) -> bool:
     return r.returncode == 0 and r.stdout.strip() == "1"
 
 
-ALL_A2A_AGENTS_PORTFORWARD = [
-    pytest.param("weather-agent-supervised", id="weather_supervised"),
-    pytest.param("adk-agent-supervised", id="adk_supervised"),
-    pytest.param("claude-sdk-agent", id="claude_sdk_agent"),
-]
+ALL_A2A_AGENTS_PORTFORWARD = ALL_A2A_AGENTS
 
 
 # ═══════════════════════════════════════════════════════════════════════════

@@ -196,135 +196,17 @@ LiteLLM proxy routes to the correct backend. Test names look like:
 
 ### MANDATORY Status Summary (print after EVERY iteration)
 
-Every `/graph-loop` iteration MUST end with ALL of the following tables.
-No exceptions. If data is missing for an environment, show `—` (not run).
+Every iteration MUST end with these 7 tables. Use `—` for environments not run.
 
-#### Table 1: Environment Totals
+1. **Environment Totals** — Pass/Fail/Skip/Total/Time per environment (4 rows)
+2. **Capability × Agent** — P/F/S/FL per cell, 4 env values: CI/CH/LK/HCP
+3. **Per-Model Stats** — tokens, time, quality per model (only if llm-metrics.json exists)
+4. **Iteration Progress** — trend arrows comparing last 4 iterations
+5. **Agent Summaries** — one-line verdict per agent
+6. **Model Summaries** — one-line verdict per model
+7. **Failure RCA** — every FAIL gets root cause + fix status
 
-```
-## Iteration N — YYYY-MM-DD
-
-| Environment      | Pass | Fail | Skip | Total | Time  | Status       |
-|------------------|:----:|:----:|:----:|:-----:|:-----:|:------------:|
-| CI Kind          | 125  |   3  |  42  |  170  |  7m   | 3 flaky LLM  |
-| CI HyperShift    |  —   |  —   |  —   |   —   |  —    | not run      |
-| Local Kind       |  52  |  15  | 103  |  170  | 47m   | 12 ADK crash |
-| Custom HyperShift|  79  |   7  |  84  |  170  | 26m   | 5 SDK timeout|
-```
-
-#### Table 2: Capability × Agent × All 4 Environments
-
-Each cell shows **4 values**: CI-Kind / CI-HCP / Local-Kind / Custom-HCP.
-Use single letters: **P**=pass, **F**=fail, **S**=skip, **—**=no test (MISS), **FL**=flaky.
-
-```
-| Capability          | Claude Code    | OpenCode       | OpenClaw       | Claude SDK     | ADK            | Weather        |
-|---------------------|:--------------:|:--------------:|:--------------:|:--------------:|:--------------:|:--------------:|
-|                     | CI/CH/LK/HCP   | CI/CH/LK/HCP   | CI/CH/LK/HCP   | CI/CH/LK/HCP   | CI/CH/LK/HCP   | CI/CH/LK/HCP   |
-| T1.1 Connectivity   | FL/—/S/S       | P/—/S/S        | P/—/S/S        | P/—/P/P        | P/—/F/P        | P/—/S/P        |
-| T1.2 Credentials    | F*/—/F*/S      | P/—/S/S        | P/—/S/S        | P/—/P/P        | P/—/P/P        | P/—/P/P        |
-| ...                 |                |                |                |                |                |                |
-| **Coverage**        | 4/—/0/0        | 7/—/2/0        | 4/—/0/0        | 9/—/9/5        | 9/—/1/9        | 3/—/1/3        |
-```
-
-Legend: CI=CI Kind, CH=CI HyperShift, LK=Local Kind, HCP=Custom HyperShift
-
-#### Table 3: Per-Model Performance (from llm-metrics.json if available)
-
-Show token consumption, execution time, and quality per model per skill.
-Only shown when `$LOG_DIR/llm-metrics.json` exists.
-
-```
-| Model              | Tests | Pass | Fail | Avg Tok In | Avg Tok Out | Avg Time | Avg Resp Len |
-|--------------------:|:-----:|:----:|:----:|:----------:|:-----------:|:--------:|:------------:|
-| llama-scout-17b     |    6  |   5  |   1  |       480  |         187 |    3.2s  |      712 ch  |
-| deepseek-r1         |    6  |   6  |   0  |       620  |         290 |    8.1s  |      945 ch  |
-| qwen3-coder:30b     |    6  |   6  |   0  |       510  |         220 |   12.4s  |      830 ch  |
-
-### Per-Model × Capability (if multiple models tested)
-
-| Capability         | llama-scout-17b       | deepseek-r1           |
-|--------------------|:---------------------:|:---------------------:|
-| T3.1 PR review     | P  342/187  3.2s      | P  410/230  7.8s      |
-| T3.2 RCA           | P  298/156  2.8s      | P  380/290  9.1s      |
-| T3.3 Security      | FL 312/45   2.1s      | P  350/210  6.5s      |
-| T3.4 GitHub PR     | P  890/340  5.7s      | P  920/380  11.2s     |
-
-Format: STATUS tokens_in/tokens_out duration
-```
-
-#### Table 4: Iteration Progress
-
-```
-| Metric             | iter 8 | iter 11 | iter 17 | iter 20 | Trend |
-|--------------------|:------:|:-------:|:-------:|:-------:|:-----:|
-| CI Kind pass       |  122   |   124   |   125   |   125   |  ↑    |
-| CI Kind fail       |    0   |     0   |     3   |     3   |  →    |
-| Custom HCP pass    |   —    |    —    |    65   |    79   |  ↑↑   |
-| Custom HCP fail    |   —    |    —    |    23   |     7   |  ↓↓   |
-| Local Kind pass    |   57   |    —    |    55   |    52   |  →    |
-| Claude Code cov    |  6/23  |  6/23   |  6/23   |  4/23   |  →    |
-| OpenClaw cov       |  2/23  |  2/23   |  2/23   |  4/23   |  ↑    |
-```
-
-#### Table 5: Per-Agent Summary
-
-One-line verdict per agent across all environments.
-
-```
-### Agent Summaries
-
-| Agent         | Best Env   | Coverage | Verdict                                          |
-|---------------|:----------:|:--------:|:-------------------------------------------------|
-| Claude SDK    | CI Kind    |  9/23    | Rock solid everywhere, LiteMaaS timeout on HCP   |
-| ADK           | CI Kind    |  9/23    | CrashLoopBackOff on local Kind (sidecar image)   |
-| Weather       | CI Kind    |  3/23    | Stable, most skips by design (no LLM)            |
-| Claude Code   | CI Kind    |  4/23    | Sandbox CRD needed; flaky LLM ~17%               |
-| OpenCode      | CI Kind    |  7/23    | Improving — T3.3 now passing                     |
-| OpenClaw      | CI Kind    |  4/23    | T2.1-T2.2 now PASS; skills need A2A adapter      |
-| NemoClaw Hermes| CI Kind   |  1/23    | Infra only — no chat API                         |
-```
-
-#### Table 6: Per-Model Summary
-
-One-line verdict per model.
-
-```
-### Model Summaries
-
-| Model              | Env        | Skill Pass Rate | Avg Time | Verdict                           |
-|--------------------|:----------:|:---------------:|:--------:|:----------------------------------|
-| llama-scout-17b    | CI (LiteMaaS) |  83% (5/6)   |   3.2s   | Fast but ~17% empty responses     |
-| deepseek-r1        | CI (LiteMaaS) |  100% (6/6)  |   8.1s   | Reliable, 2x slower               |
-| qwen3-coder:30b    | Local (Ollama) |  100% (6/6) |  12.4s   | Best local model, 256K context    |
-| deepseek-r1:32b    | Local (Ollama) |  100% (3/3) |  18.7s   | Thinking model, fails short prompts|
-```
-
-#### Table 7: Failure RCA (if any failures this iteration)
-
-Every FAIL must have a one-line root cause. Group by category.
-
-```
-### Failure RCA
-
-| # | Test | Env | Error | Root Cause | Fix |
-|---|------|-----|-------|------------|-----|
-| 1 | claude__simple_prompt | CI Kind | empty output | llama-scout-17b returns empty ~17% | FLAKY — model quality |
-| 2 | claude__anthropic_from_secret | CI Kind | NameError | stale `result` variable | FIXED in 416bd310 |
-| 3 | adk__connectivity | Local Kind | httpx.ReadTimeout | CrashLoopBackOff (sidecar) | rebuild sidecar image |
-```
-
-### Infrastructure tests (separate section)
-
-These are not per-agent — they validate the platform:
-
-| Category | Key tests | Pass condition |
-|---|---|---|
-| **Gateway** | `test_gateway_pod_running`, `test_gateway_containers_ready` | All PASS |
-| **Waypoint** | `test_waypoint_exists_if_labeled`, `test_waypoint_pod_running` | All PASS |
-| **LiteLLM secure** | `test_configmap_no_plaintext_api_keys`, `test_litellm_uses_correct_provider` | All PASS |
-| **Anthropic passthrough** | `test_anthropic_messages_api_returns_response` | All PASS |
-| **Platform** | `test_operator_pod_running`, all test_01 | All PASS |
+Legend: P=pass, F=fail, S=skip, —=miss, FL=flaky, CI=CI Kind, CH=CI HyperShift, LK=Local Kind, HCP=Custom HCP
 
 ## One Iteration
 
@@ -560,35 +442,6 @@ All 4 environments show:
 
 ## End-of-Cycle Review (after 5 iterations)
 
-After 5 iterations (or when progress stalls), present a structured summary
-to the user with batched questions so they can unblock the next cycle.
-
-### Summary format:
-```markdown
-## Graph Loop Cycle Complete — Iterations 1-5
-
-### Matrix (final state)
-[full matrix table here]
-
-### Resolved this cycle
-- [x] Claude Code sandbox: works via LiteLLM (hosted_vllm provider)
-- [x] Waypoint: created automatically in fulltest script
-
-### Remaining blockers
-| # | Issue | Environments | Root cause | Options |
-|---|-------|-------------|-----------|---------|
-| 1 | Gateway not deployed on HyperShift CI | ci-hcp | Image pull auth | A) Add imagePullSecret, B) Push to public registry |
-| 2 | OPENAI_API_KEY empty in CI | ci-kind, ci-hcp | Fork PR + issue_comment | A) Use workflow_run, B) Store in repo var |
-| 3 | Flaky security review test | kind | LLM returns empty | A) Retry decorator, B) Stronger prompt |
-
-### Questions for user (answer all, then run next /graph-loop)
-1. **Image registry**: Should we push gateway images to ghcr.io/kagenti/ (public) or add imagePullSecret for ghcr.io/nvidia/?
-2. **CI secret access**: The OPENAI_API_KEY secret is empty for fork PRs. Should we move to workflow_run trigger or use a repo-level variable?
-3. **Flaky test policy**: Mark as FLAKY and track, or add retry logic?
-4. **HyperShift scope**: Should custom HyperShift testing be part of this PR or a follow-up?
-```
-
-### Why batched questions:
-- User answers all at once → next `/graph-loop` cycle has clear direction
-- No back-and-forth blocking — one decision point per cycle
-- Questions include options so user can pick fast
+After 5 iterations or when progress stalls, present: final matrix, resolved
+items, remaining blockers with options, and batched questions for user to
+unblock the next cycle. User answers all at once → clear direction.
