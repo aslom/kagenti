@@ -303,13 +303,25 @@ if $DEPLOY_AGENTS; then
     --from-literal=skills.json='{"version":"1.0","source":"kagenti/.claude/skills/","skills":[{"name":"review","type":"claude-code-skill"},{"name":"rca","type":"claude-code-skill"},{"name":"k8s:health","type":"claude-code-skill"},{"name":"k8s:pods","type":"claude-code-skill"},{"name":"k8s:logs","type":"claude-code-skill"},{"name":"tdd:kind","type":"claude-code-skill"},{"name":"tdd:hypershift","type":"claude-code-skill"},{"name":"github:pr-review","type":"claude-code-skill"},{"name":"security-review","type":"claude-code-skill"}]}' \
     --dry-run=client -o yaml | kubectl apply -f - 2>&1 | grep -v "^Warning:" || true
 
-  # Apply agent manifests
+  # Apply agent manifests and policy ConfigMaps
   AGENTS_DIR="$REPO_ROOT/deployments/openshell/agents"
   if [ -d "$AGENTS_DIR" ]; then
-    for manifest in "$AGENTS_DIR"/*.yaml "$AGENTS_DIR"/*/deployment.yaml; do
+    for agent_dir in "$AGENTS_DIR"/*/; do
+      agent_name=$(basename "$agent_dir")
+      manifest="$agent_dir/deployment.yaml"
       [ -f "$manifest" ] || continue
-      log_info "Applying: $(basename "$manifest")"
+      log_info "Applying: $agent_name"
       run_cmd kubectl apply -f "$manifest" 2>&1 | grep -v "ensure CRDs" || true
+
+      # Create/update policy ConfigMap if policy files exist
+      if [[ -f "$agent_dir/policy-data.yaml" ]]; then
+        cm_args=("--from-file=policy.yaml=$agent_dir/policy-data.yaml")
+        if [[ -f "$agent_dir/sandbox-policy.rego" ]]; then
+          cm_args+=("--from-file=sandbox-policy.rego=$agent_dir/sandbox-policy.rego")
+        fi
+        kubectl create configmap "${agent_name}-policy" -n "$TENANT" "${cm_args[@]}" \
+            --dry-run=client -o yaml | kubectl apply -f - 2>&1 | grep -v "^Warning:" || true
+      fi
     done
   fi
 
