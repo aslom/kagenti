@@ -21,6 +21,8 @@ on:
     branches: [main]
     paths:
       - 'deployments/openshell/**'
+      - 'charts/openshell/**'
+      - 'scripts/openshell/**'
       - 'kagenti/tests/e2e/openshell/**'
       - '.github/scripts/local-setup/openshell-full-test.sh'
       - '.github/scripts/local-setup/openshell-build-agents.sh'
@@ -29,6 +31,8 @@ on:
     branches: [main]
     paths:
       - 'deployments/openshell/**'
+      - 'charts/openshell/**'
+      - 'scripts/openshell/**'
       - 'kagenti/tests/e2e/openshell/**'
       - '.github/scripts/local-setup/openshell-full-test.sh'
       - '.github/scripts/local-setup/openshell-build-agents.sh'
