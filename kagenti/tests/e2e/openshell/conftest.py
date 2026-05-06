@@ -17,10 +17,13 @@ Run:
 """
 
 import json
+import logging
 import os
 import subprocess
 import time as _time
 from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 
 import httpx
 import pytest
@@ -516,6 +519,9 @@ def _ensure_claude_sandbox(namespace: str = "team1") -> str | None:
         "get", "svc", "litellm-model-proxy", "-n", namespace, timeout=10
     )
     if litellm_svc.returncode != 0:
+        logger.warning(
+            f"LiteLLM service not found in {namespace} — sandbox tests will skip",
+        )
         _claude_sandbox_pod[cache_key] = None
         return None
 
@@ -563,6 +569,9 @@ spec:
         timeout=30,
     )
     if result.returncode != 0:
+        logger.warning(
+            f"Sandbox CR creation failed: {result.stderr[:200]}",
+        )
         _claude_sandbox_pod[cache_key] = None
         return None
 
@@ -581,6 +590,7 @@ spec:
             return pod_name
         time.sleep(5)
 
+    logger.warning("Sandbox pod %s not Running after 90s in %s", name, namespace)
     _claude_sandbox_pod[cache_key] = None
     return None
 
@@ -624,6 +634,11 @@ def run_claude_in_sandbox(
     )
 
     if exec_result.returncode != 0:
+        logger.warning(
+            "Claude exec failed (rc=%d): %s",
+            exec_result.returncode,
+            exec_result.stderr[:200],
+        )
         return None
 
     return exec_result.stdout
