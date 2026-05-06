@@ -49,6 +49,7 @@ WITH_KUADRANT=false
 WITH_AGENT_SANDBOX=false
 SKIP_CLUSTER=false
 BUILD_IMAGES=false
+PRELOAD_IMAGES=false
 DRY_RUN=false
 SECRETS_FILE_ARG=""
 CONTAINER_ENGINE="${CONTAINER_ENGINE:-docker}"
@@ -98,6 +99,7 @@ while [[ $# -gt 0 ]]; do
       shift ;;
     --skip-cluster)     SKIP_CLUSTER=true; shift ;;
     --build-images)     BUILD_IMAGES=true; shift ;;
+    --preload-images)   PRELOAD_IMAGES=true; shift ;;
     --secrets-file)     SECRETS_FILE_ARG="$2"; shift 2 ;;
     --cluster-name)     CLUSTER_NAME="$2"; shift 2 ;;
     --domain)           DOMAIN="$2"; shift 2 ;;
@@ -124,6 +126,8 @@ while [[ $# -gt 0 ]]; do
       echo "  --skip-cluster      Don't create Kind cluster (reuse existing)"
       echo "  --build-images      Build platform images from source and load into Kind"
       echo "                      (backend, ui-v2, agent-oauth-secret, mlflow-oauth-secret)"
+      echo "  --preload-images    Pre-pull third-party images and load into Kind for"
+      echo "                      faster pod startup (reads scripts/kind/preload-images.txt)"
       echo "  --secrets-file FILE YAML file with secrets (keys: githubUser, githubToken,"
       echo "                      openaiApiKey, slackBotToken, etc.)"
       echo "  --cluster-name NAME Kind cluster name (default: kagenti)"
@@ -182,6 +186,7 @@ echo "    Kiali:         $WITH_KIALI"
 echo "    Agent Sandbox: $WITH_AGENT_SANDBOX"
 echo "    Skip cluster:  $SKIP_CLUSTER"
 echo "    Build images:  $BUILD_IMAGES"
+echo "    Preload imgs:  $PRELOAD_IMAGES"
 echo ""
 
 for cmd in helm kubectl; do
@@ -248,6 +253,69 @@ fi
 
 kubectl cluster-info --context "kind-${CLUSTER_NAME}" &>/dev/null || true
 echo ""
+
+# ============================================================================
+# Step 1b: Preload images (--preload-images)
+# ============================================================================
+PRELOAD_LOAD_PID=""
+if $PRELOAD_IMAGES && ! $DRY_RUN; then
+  PRELOAD_FILE="$SCRIPT_DIR/preload-images.txt"
+  if [ ! -f "$PRELOAD_FILE" ]; then
+    log_error "Preload images file not found: $PRELOAD_FILE"
+    exit 1
+  fi
+
+  mapfile -t PRELOAD_LIST < <(grep -v '^\s*#' "$PRELOAD_FILE" | grep -v '^\s*$')
+  if [ ${#PRELOAD_LIST[@]} -eq 0 ]; then
+    log_warn "Preload images file is empty — skipping"
+  else
+    log_info "Pulling ${#PRELOAD_LIST[@]} images for preload..."
+
+    if [ "$CONTAINER_ENGINE" = "podman" ]; then
+      for img in "${PRELOAD_LIST[@]}"; do
+        $CONTAINER_ENGINE pull "$img" 2>&1 | grep -E "^(Status:|Error|Trying to pull)" || true
+      done
+    else
+      PULL_PIDS=""
+      for img in "${PRELOAD_LIST[@]}"; do
+        ($CONTAINER_ENGINE pull "$img" >/dev/null 2>&1) &
+        PULL_PIDS="$PULL_PIDS $!"
+      done
+      PULL_FAIL=0
+      for pid in $PULL_PIDS; do
+        wait "$pid" || PULL_FAIL=1
+      done
+      if [ $PULL_FAIL -ne 0 ]; then
+        log_warn "Some images failed to pull — continuing (pods will pull on demand)"
+      fi
+    fi
+    log_success "Image pull complete"
+
+    # Load into Kind node asynchronously (docker save + ctr import avoids
+    # issues with 'kind load docker-image' on Rancher Desktop VZ)
+    log_info "Loading images into Kind node (background)..."
+    (
+      LOAD_FAIL=0
+      for img in "${PRELOAD_LIST[@]}"; do
+        tmp=$(mktemp /tmp/kind-preload.XXXXXX)
+        if $CONTAINER_ENGINE save "$img" -o "$tmp" 2>/dev/null && \
+           $CONTAINER_ENGINE cp "$tmp" "${CLUSTER_NAME}-control-plane:/$( basename "$tmp")" 2>/dev/null && \
+           $CONTAINER_ENGINE exec "${CLUSTER_NAME}-control-plane" \
+             ctr --namespace=k8s.io images import "/$( basename "$tmp")" >/dev/null 2>&1; then
+          :
+        else
+          LOAD_FAIL=1
+        fi
+        $CONTAINER_ENGINE exec "${CLUSTER_NAME}-control-plane" rm -f "/$( basename "$tmp")" 2>/dev/null || true
+        rm -f "$tmp"
+      done
+      exit $LOAD_FAIL
+    ) &
+    PRELOAD_LOAD_PID=$!
+  fi
+elif $PRELOAD_IMAGES && $DRY_RUN; then
+  log_info "[dry-run] Would preload images from $SCRIPT_DIR/preload-images.txt"
+fi
 
 # ============================================================================
 # Step 2: Install cert-manager (core — required by webhook TLS)
@@ -972,6 +1040,16 @@ run_cmd helm dependency update "$REPO_ROOT/charts/kagenti/"
 kubectl delete job kagenti-ui-oauth-secret-job -n kagenti-system --ignore-not-found 2>/dev/null || true
 kubectl delete job kagenti-agent-oauth-secret-job -n kagenti-system --ignore-not-found 2>/dev/null || true
 kubectl delete job mlflow-oauth-secret-job -n kagenti-system --ignore-not-found 2>/dev/null || true
+
+# ── Wait for preload to finish (if running) ──
+if [ -n "$PRELOAD_LOAD_PID" ]; then
+  log_info "Waiting for image preload to complete..."
+  if wait "$PRELOAD_LOAD_PID"; then
+    log_success "All images preloaded into Kind"
+  else
+    log_warn "Some images failed to load — pods will pull on demand"
+  fi
+fi
 
 # ── Build platform images from source (--build-images) ──
 if $BUILD_IMAGES && ! $DRY_RUN; then
