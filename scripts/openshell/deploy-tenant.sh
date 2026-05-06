@@ -313,7 +313,7 @@ if $DEPLOY_AGENTS; then
       log_info "Applying: $agent_name"
       run_cmd kubectl apply -f "$manifest" 2>&1 | grep -v "ensure CRDs" || true
 
-      # Create/update policy ConfigMap if policy files exist
+      # Create/update policy ConfigMap and restart agent to pick up changes
       if [[ -f "$agent_dir/policy-data.yaml" ]]; then
         cm_args=("--from-file=policy.yaml=$agent_dir/policy-data.yaml")
         if [[ -f "$agent_dir/sandbox-policy.rego" ]]; then
@@ -321,6 +321,7 @@ if $DEPLOY_AGENTS; then
         fi
         kubectl create configmap "${agent_name}-policy" -n "$TENANT" "${cm_args[@]}" \
             --dry-run=client -o yaml | kubectl apply -f - 2>&1 | grep -v "^Warning:" || true
+        kubectl rollout restart "deploy/$agent_name" -n "$TENANT" 2>/dev/null || true
       fi
     done
   fi
