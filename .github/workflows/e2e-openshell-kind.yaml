@@ -57,6 +57,7 @@ jobs:
     permissions:
       pull-requests: write
       contents: read
+      statuses: write
     outputs:
       authorized: ${{ steps.check.outputs.has-permission }}
       pr_sha: ${{ steps.pr-info.outputs.sha }}
@@ -90,6 +91,21 @@ jobs:
             });
             core.setOutput('sha', pr.head.sha);
 
+      - name: Create pending commit status
+        if: steps.check.outputs.has-permission == 'true' && github.event_name == 'issue_comment'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
+        with:
+          script: |
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner, repo: context.repo.repo,
+              sha: '${{ steps.pr-info.outputs.sha }}',
+              state: 'pending',
+              target_url: runUrl,
+              description: 'OpenShell E2E tests running on Kind',
+              context: 'OpenShell PoC (Kind) [/run-e2e-openshell]'
+            });
+
       - name: React with rocket
         if: steps.check.outputs.has-permission == 'true' && github.event_name == 'issue_comment'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
@@ -110,6 +126,7 @@ jobs:
     continue-on-error: true
     permissions:
       contents: read
+      statuses: write
 
     steps:
       - name: Checkout repository
@@ -183,3 +200,19 @@ jobs:
           path: |
             test-results/
             /tmp/kagenti/
+
+      - name: Update commit status
+        if: always() && github.event_name == 'issue_comment' && needs.authorize.outputs.pr_sha
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
+        with:
+          script: |
+            const passed = '${{ steps.run-tests.outcome }}' === 'success';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner, repo: context.repo.repo,
+              sha: '${{ needs.authorize.outputs.pr_sha }}',
+              state: passed ? 'success' : 'failure',
+              target_url: runUrl,
+              description: `OpenShell E2E ${passed ? 'Passed' : 'Failed'}`,
+              context: 'OpenShell PoC (Kind) [/run-e2e-openshell]'
+            });
