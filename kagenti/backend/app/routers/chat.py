@@ -157,18 +157,25 @@ async def send_message(
     agent_url = resolve_agent_url(name, namespace, kube)
     session_id = request.session_id or uuid4().hex
 
-    # Build A2A message payload
+    # Build A2A message payload. When the frontend supplied a session_id
+    # (subsequent turns of the same conversation), forward it as
+    # params.contextId so the agent joins the existing A2A task chain
+    # instead of spinning up a fresh context per message.
+    params: dict = {
+        "message": {
+            "role": "user",
+            "parts": [{"kind": "text", "text": request.message}],
+            "messageId": uuid4().hex,
+        },
+    }
+    if request.session_id:
+        params["contextId"] = request.session_id
+
     message_payload = {
         "jsonrpc": "2.0",
         "id": str(uuid4()),
         "method": "message/send",
-        "params": {
-            "message": {
-                "role": "user",
-                "parts": [{"kind": "text", "text": request.message}],
-                "messageId": uuid4().hex,
-            },
-        },
+        "params": params,
     }
 
     # Prepare headers with optional Authorization
@@ -192,6 +199,15 @@ async def send_message(
             content = ""
             if "result" in result:
                 result_data = result["result"]
+                # Adopt the agent-assigned contextId only on the very first
+                # turn (when the caller had no session_id yet). Subsequent
+                # turns must reuse the caller's session_id — some agent SDKs
+                # mint a fresh contextId every response, and adopting that
+                # would churn the UI state and split events across buckets.
+                if not request.session_id:
+                    agent_ctx = result_data.get("contextId") or result_data.get("sessionId")
+                    if agent_ctx:
+                        session_id = agent_ctx
                 # Handle Task response
                 if "status" in result_data and "message" in result_data.get("status", {}):
                     parts = result_data["status"]["message"].get("parts", [])
@@ -287,6 +303,7 @@ async def _stream_from_response(
     response: httpx.Response,
     session_id: str,
     username: Optional[str] = None,
+    caller_supplied_session_id: bool = False,
 ):
     """Stream SSE events from an already-connected agent response.
 
@@ -343,6 +360,16 @@ async def _stream_from_response(
                         continue
 
                     result = chunk["result"]
+                    # Adopt the agent's contextId only on the first turn (when
+                    # the caller had no session_id yet). Some A2A SDKs mint a
+                    # fresh contextId on every response even when the client
+                    # supplied one; adopting that new ID every turn would
+                    # churn the UI's sessionId state and split telemetry
+                    # across a new authbridge bucket per message.
+                    if not caller_supplied_session_id:
+                        agent_ctx = result.get("contextId") or result.get("sessionId")
+                        if agent_ctx and agent_ctx != session_id:
+                            session_id = agent_ctx
                     payload = {"session_id": session_id}
                     if username:
                         payload["username"] = username
@@ -476,20 +503,24 @@ async def stream_message(
     if authorization:
         headers["Authorization"] = authorization
 
+    # See /send handler: forward the client's session_id as params.contextId
+    # so multi-turn conversations stay in one A2A context.
+    stream_params: dict = {
+        "message": {
+            "role": "user",
+            "parts": [{"kind": "text", "text": request.message}],
+            "messageId": uuid4().hex,
+        },
+    }
+    if request.session_id:
+        stream_params["contextId"] = request.session_id
+
     message_payload = {
         "jsonrpc": "2.0",
         "id": str(uuid4()),
         "method": "message/stream",
-        "params": {
-            "message": {
-                "role": "user",
-                "parts": [{"kind": "text", "text": request.message}],
-                "messageId": uuid4().hex,
-            },
-        },
+        "params": stream_params,
     }
-
-    logger.debug("Starting A2A stream to %s with session_id=%s", agent_url, session_id)
 
     client = httpx.AsyncClient(timeout=120.0)
     try:
@@ -508,7 +539,13 @@ async def stream_message(
         raise HTTPException(status_code=401, detail="Agent rejected token (audience mismatch)")
 
     return StreamingResponse(
-        _stream_from_response(client, response, session_id, user.username),
+        _stream_from_response(
+            client,
+            response,
+            session_id,
+            user.username,
+            caller_supplied_session_id=bool(request.session_id),
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
