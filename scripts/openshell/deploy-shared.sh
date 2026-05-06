@@ -257,7 +257,9 @@ if $STEP_GATEWAY_API && ! is_openshift; then
       PILOT_ENABLE_ALPHA_GATEWAY_API=true
 
     if ! $DRY_RUN; then
-      kubectl rollout status deployment/istiod -n istio-system --timeout=60s
+      kubectl rollout status deployment/istiod -n istio-system --timeout=120s || {
+        log_warn "istiod rollout slow — continuing (will settle during tenant deploy)"
+      }
     fi
     log_success "Istio alpha Gateway API support enabled"
   fi
@@ -717,9 +719,12 @@ spec:
       restartPolicy: Never
 EOJOB
     done
-    log_info "Waiting for pre-pull Jobs to complete (up to 5 min)..."
-    kubectl wait --for=condition=Complete job -l 'batch.kubernetes.io/job-name' \
-      -n team1 --timeout=300s 2>/dev/null || log_warn "Some pre-pull jobs still running"
+    log_info "Waiting for pre-pull Jobs to complete (up to 10 min)..."
+    for jn in $PULL_IMAGES; do
+      jname="pull-$(echo "$jn" | sed 's|[/:.@]|-|g' | tail -c 58)"
+      kubectl wait --for=condition=Complete "job/$jname" \
+        -n team1 --timeout=600s 2>/dev/null || log_warn "Pre-pull $jname not complete"
+    done
   else
     # Kind: docker pull + kind load
     if docker exec "${KIND_CLUSTER}-control-plane" crictl images 2>/dev/null | grep -q "sandboxes/base"; then
