@@ -24,12 +24,11 @@ from kagenti.tests.e2e.openshell.conftest import (
     destructive_tests_enabled,
     AGENT_PROMPTS,
     FIXTURE_MAP,
+    LLM_AVAILABLE,
     LLM_CAPABLE_AGENTS,
 )
 
 pytestmark = pytest.mark.openshell
-
-LLM_AVAILABLE = os.getenv("OPENSHELL_LLM_AVAILABLE", "").lower() == "true"
 AGENT_NS = os.getenv("OPENSHELL_AGENT_NAMESPACE", "team1")
 BASE_IMAGE = "ghcr.io/nvidia/openshell-community/sandboxes/base:latest"
 

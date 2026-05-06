@@ -694,7 +694,7 @@ if $STEP_PREPULL; then
     # OCP: Start pull Jobs for all images in parallel (non-blocking)
     PULL_IMAGES="$BASE_IMAGE ${GW_REPO}:${GW_TAG} ${CD_REPO}:${CD_TAG} ${CR_REPO}:${CR_TAG}"
     for img in $PULL_IMAGES; do
-      job_name="prepull-$(echo "$img" | sed 's|[/:.@]|-|g' | tail -c 60)"
+      job_name="pull-$(echo "$img" | sed 's|[/:.@]|-|g' | tail -c 58)"
       if kubectl get job "$job_name" -n team1 &>/dev/null; then
         continue
       fi

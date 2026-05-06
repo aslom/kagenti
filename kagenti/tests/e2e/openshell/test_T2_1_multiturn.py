@@ -21,13 +21,12 @@ from kagenti.tests.e2e.openshell.conftest import (
     AGENT_PROMPTS,
     ALL_A2A_AGENTS,
     FIXTURE_MAP,
+    LLM_AVAILABLE,
     LLM_CAPABLE_AGENTS,
     kubectl_run,
 )
 
 pytestmark = pytest.mark.openshell
-
-LLM_AVAILABLE = os.getenv("OPENSHELL_LLM_AVAILABLE", "").lower() == "true"
 AGENT_NS = os.getenv("OPENSHELL_AGENT_NAMESPACE", "team1")
 
 

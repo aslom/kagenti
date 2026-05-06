@@ -62,10 +62,15 @@ def agent_port():
     return int(os.getenv("OPENSHELL_AGENT_PORT", "8080"))
 
 
+# True when LiteLLM proxy is deployed and reachable (set by openshell-full-test.sh)
+LLM_AVAILABLE = os.getenv("OPENSHELL_LLM_AVAILABLE", "false").lower() == "true"
+skip_no_llm = pytest.mark.skipif(not LLM_AVAILABLE, reason="LLM proxy not available")
+
+
 @pytest.fixture(scope="session")
 def llm_available():
     """Whether an LLM backend is available for LLM-dependent tests."""
-    return os.getenv("OPENSHELL_LLM_AVAILABLE", "false").lower() == "true"
+    return LLM_AVAILABLE
 
 
 # ---------------------------------------------------------------------------

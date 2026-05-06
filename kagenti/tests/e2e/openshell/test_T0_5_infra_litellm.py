@@ -16,6 +16,8 @@ import httpx
 import pytest
 
 from kagenti.tests.e2e.openshell.conftest import (
+    LLM_AVAILABLE,
+    skip_no_llm,
     kubectl_run,
     LLM_MODELS,
     LLM_PROVIDER,
@@ -24,8 +26,6 @@ from kagenti.tests.e2e.openshell.conftest import (
 pytestmark = pytest.mark.openshell
 
 AGENT_NS = os.getenv("OPENSHELL_AGENT_NAMESPACE", "team1")
-LLM_AVAILABLE = os.getenv("OPENSHELL_LLM_AVAILABLE", "").lower() == "true"
-skip_no_llm = pytest.mark.skipif(not LLM_AVAILABLE, reason="LLM not available")
 IS_OLLAMA = LLM_PROVIDER == "ollama"
 
 

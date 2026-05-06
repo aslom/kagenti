@@ -18,8 +18,10 @@ from kagenti.tests.e2e.openshell.conftest import (
     A2A_AGENT_NAMES,
     EXEC_AGENT_NAMES,
     FIXTURE_MAP,
+    LLM_AVAILABLE,
     LLM_CAPABLE_AGENTS,
     NEMOCLAW_AGENT_CONFIG,
+    skip_no_llm,
     kubectl_run,
     nemoclaw_enabled,
     run_claude_in_sandbox,
@@ -28,8 +30,6 @@ from kagenti.tests.e2e.openshell.conftest import (
 )
 
 pytestmark = pytest.mark.openshell
-
-LLM_AVAILABLE = os.getenv("OPENSHELL_LLM_AVAILABLE", "").lower() == "true"
 AGENT_NS = os.getenv("OPENSHELL_AGENT_NAMESPACE", "team1")
 
 A2A_AGENTS = A2A_AGENT_NAMES
@@ -124,7 +124,6 @@ class TestExecConnectivity:
 # ── Sandbox connectivity (Claude Code, OpenCode) ──
 
 
-skip_no_llm = pytest.mark.skipif(not LLM_AVAILABLE, reason="LLM not available")
 skip_no_crd = pytest.mark.skipif(
     not sandbox_crd_installed(), reason="Sandbox CRD not installed"
 )

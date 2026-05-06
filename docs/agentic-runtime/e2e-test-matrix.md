@@ -93,19 +93,29 @@ Per-model: `llama-scout-17b` + `deepseek-r1` (both 100% via LiteMaaS).
 
 ## Running Tests
 
-```bash
-# CI Kind (via PR comment)
-/run-e2e-openshell
+### CI (via PR comment on any PR)
 
-# Local Kind (existing cluster)
+Comment `/run-e2e-openshell` on a PR to trigger both:
+- **OpenShell PoC (Kind)** — `e2e-openshell-kind.yaml` (~20 min)
+- **OpenShell PoC (HyperShift)** — `e2e-openshell-hypershift.yaml` (~45 min, creates ephemeral cluster)
+
+The Kind workflow also auto-triggers on `pull_request` for paths under
+`deployments/openshell/**` and `kagenti/tests/e2e/openshell/**`.
+
+### Local
+
+```bash
+# Full deploy + test on Kind
+.github/scripts/local-setup/openshell-full-test.sh --skip-cluster-destroy
+
+# Iterate on existing Kind cluster (skip deploy)
 .github/scripts/local-setup/openshell-full-test.sh --skip-cluster-create --skip-cluster-destroy
 
-# HyperShift (existing cluster)
+# Full deploy + test on HyperShift
 source .env.kagenti-hypershift-custom
-export KUBECONFIG=~/clusters/hcp/<cluster>/auth/kubeconfig
-.github/scripts/local-setup/openshell-full-test.sh --platform ocp --skip-cluster-create --skip-cluster-destroy
+.github/scripts/local-setup/openshell-full-test.sh --platform ocp --skip-cluster-destroy ostest
 
-# Direct pytest (no deploy)
+# Direct pytest (no deploy, existing cluster)
 export OPENSHELL_LLM_AVAILABLE=true OPENSHELL_LLM_MODELS="llama-scout-17b,deepseek-r1"
 export OPENSHELL_NEMOCLAW_ENABLED=true OPENSHELL_GATEWAY_NAMESPACE=team1
 uv run pytest kagenti/tests/e2e/openshell/ -v --timeout=300
