@@ -288,9 +288,9 @@ fi
 # ============================================================================
 log_phase "PHASE 4: Deploy Shared Infrastructure"
 
-SHARED_ARGS=()
+SHARED_ARGS=(--pre-pull)
 if [ "$PLATFORM" = "kind" ]; then
-    SHARED_ARGS+=(--pre-pull --kind-cluster "$CLUSTER_NAME")
+    SHARED_ARGS+=(--kind-cluster "$CLUSTER_NAME")
 fi
 if [ "$MAAS_SOURCED" = "true" ]; then
     SHARED_ARGS+=(--litellm)

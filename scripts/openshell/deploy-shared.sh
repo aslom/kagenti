@@ -681,29 +681,45 @@ if $STEP_PREPULL; then
 
   BASE_IMAGE="ghcr.io/nvidia/openshell-community/sandboxes/base:latest"
 
+  # Read gateway image tags from values.yaml
+  CHART_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/charts/openshell"
+  GW_REPO=$(grep -A2 'gateway:' "$CHART_DIR/values.yaml" | grep 'repository:' | awk '{print $2}')
+  GW_TAG=$(grep -A3 'gateway:' "$CHART_DIR/values.yaml" | grep 'tag:' | awk '{print $2}')
+  CD_REPO=$(grep -A2 'computeDriver:' "$CHART_DIR/values.yaml" | grep 'repository:' | awk '{print $2}')
+  CD_TAG=$(grep -A3 'computeDriver:' "$CHART_DIR/values.yaml" | grep 'tag:' | awk '{print $2}')
+  CR_REPO=$(grep -A2 'credentialsDriver:' "$CHART_DIR/values.yaml" | grep 'repository:' | awk '{print $2}')
+  CR_TAG=$(grep -A3 'credentialsDriver:' "$CHART_DIR/values.yaml" | grep 'tag:' | awk '{print $2}')
+
   if is_openshift; then
-    # OCP: Start a pull Job in team1 (non-blocking)
-    if ! kubectl get job openshell-base-pull -n team1 &>/dev/null; then
-      log_info "Starting base sandbox image pre-pull Job (OCP)..."
+    # OCP: Start pull Jobs for all images in parallel (non-blocking)
+    PULL_IMAGES="$BASE_IMAGE ${GW_REPO}:${GW_TAG} ${CD_REPO}:${CD_TAG} ${CR_REPO}:${CR_TAG}"
+    for img in $PULL_IMAGES; do
+      job_name="prepull-$(echo "$img" | sed 's|[/:.@]|-|g' | tail -c 60)"
+      if kubectl get job "$job_name" -n team1 &>/dev/null; then
+        continue
+      fi
+      log_info "Pre-pulling $img..."
       run_cmd kubectl apply -f - <<EOJOB
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: openshell-base-pull
+  name: $job_name
   namespace: team1
 spec:
-  ttlSecondsAfterFinished: 600
+  ttlSecondsAfterFinished: 300
   template:
     spec:
       containers:
       - name: pull
-        image: $BASE_IMAGE
-        command: ["echo", "Image pulled successfully"]
+        image: $img
+        imagePullPolicy: Always
+        command: ["echo", "pulled"]
       restartPolicy: Never
 EOJOB
-    else
-      log_success "Base image pre-pull Job already exists"
-    fi
+    done
+    log_info "Waiting for pre-pull Jobs to complete (up to 5 min)..."
+    kubectl wait --for=condition=Complete job -l 'batch.kubernetes.io/job-name' \
+      -n team1 --timeout=300s 2>/dev/null || log_warn "Some pre-pull jobs still running"
   else
     # Kind: docker pull + kind load
     if docker exec "${KIND_CLUSTER}-control-plane" crictl images 2>/dev/null | grep -q "sandboxes/base"; then
