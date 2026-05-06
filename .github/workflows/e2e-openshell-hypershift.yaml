@@ -32,6 +32,7 @@ jobs:
     permissions:
       pull-requests: write
       contents: read
+      statuses: write
     outputs:
       authorized: ${{ steps.check.outputs.has-permission }}
       pr_number: ${{ steps.pr-info.outputs.number }}
@@ -230,6 +231,7 @@ jobs:
     if: always() && needs.authorize.outputs.authorized == 'true' && github.event_name != 'workflow_dispatch'
     permissions:
       pull-requests: write
+      statuses: write
     steps:
       - name: Post result comment
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
