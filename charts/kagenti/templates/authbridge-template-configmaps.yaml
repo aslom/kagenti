@@ -28,6 +28,7 @@ data:
   SPIFFE_IDP_ALIAS: "{{ .Values.authBridge.spiffeIdpAlias }}"
   JWT_AUDIENCE: "{{ .Values.keycloak.publicUrl }}/realms/{{ .Values.keycloak.realm }}"
   EXPECTED_AUDIENCE: "{{ .Values.keycloak.publicUrl }}/realms/{{ .Values.keycloak.realm }}"
+  CREDENTIAL_WAIT_TIMEOUT: {{ .Values.authBridge.credentialWaitTimeout | quote }}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -49,6 +50,7 @@ data:
       type: {{ eq .Values.authBridge.clientAuthType "federated-jwt" | ternary "spiffe" .Values.authBridge.clientAuthType | quote }}
       client_id_file: "/shared/client-id.txt"
       client_secret_file: "/shared/client-secret.txt"
+      credential_wait_timeout: {{ .Values.authBridge.credentialWaitTimeout | quote }}
 {{- if eq .Values.authBridge.clientAuthType "federated-jwt" }}
       jwt_svid_path: "/opt/jwt_svid.token"
 {{- end }}
