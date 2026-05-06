@@ -1037,26 +1037,9 @@ fi
 echo ""
 
 # ============================================================================
-# Step 5: Install MCP Gateway
+# Step 5: Install Kuadrant operator (optional, --with-kuadrant)
 # ============================================================================
-log_info "Step 5: Install MCP Gateway"
-
-if $SKIP_MCP_GATEWAY; then
-  log_info "Skipped (--skip-mcp-gateway)"
-elif helm status mcp-gateway -n mcp-system &>/dev/null; then
-  log_info "MCP Gateway already installed — skipping"
-else
-  log_info "Installing MCP Gateway v${MCP_GATEWAY_VERSION}..."
-  run_cmd helm install mcp-gateway oci://ghcr.io/kuadrant/charts/mcp-gateway \
-    --create-namespace --namespace mcp-system --version "$MCP_GATEWAY_VERSION"
-  log_success "MCP Gateway installed"
-fi
-echo ""
-
-# ============================================================================
-# Step 5b: Install Kuadrant operator (optional, --with-kuadrant)
-# ============================================================================
-log_info "Step 5b: Kuadrant"
+log_info "Step 5: Kuadrant"
 
 if $WITH_KUADRANT; then
   KUADRANT_NS="kuadrant-system"
@@ -1087,6 +1070,23 @@ EOF
   log_success "Kuadrant installed"
 else
   log_info "Skipped (use --with-kuadrant)"
+fi
+echo ""
+
+# ============================================================================
+# Step 5b: Install MCP Gateway
+# ============================================================================
+log_info "Step 5b: Install MCP Gateway"
+
+if $SKIP_MCP_GATEWAY; then
+  log_info "Skipped (--skip-mcp-gateway)"
+elif helm status mcp-gateway -n mcp-system &>/dev/null; then
+  log_info "MCP Gateway already installed — skipping"
+else
+  log_info "Installing MCP Gateway v${MCP_GATEWAY_VERSION}..."
+  run_cmd helm install mcp-gateway oci://ghcr.io/kuadrant/charts/mcp-gateway \
+    --create-namespace --namespace mcp-system --version "$MCP_GATEWAY_VERSION"
+  log_success "MCP Gateway installed"
 fi
 echo ""
 
