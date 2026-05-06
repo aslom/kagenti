@@ -291,25 +291,23 @@ if $PRELOAD_IMAGES && ! $DRY_RUN; then
     fi
     log_success "Image pull complete"
 
-    # Load into Kind node asynchronously (docker save + ctr import avoids
-    # issues with 'kind load docker-image' on Rancher Desktop VZ)
-    log_info "Loading images into Kind node (background)..."
+    # Load into Kind node asynchronously using a single batched tar
+    # (docker save + ctr import — avoids 'kind load docker-image' issues on
+    # Rancher Desktop VZ and reduces IPC round-trips vs per-image loading)
+    log_info "Loading ${#PRELOAD_LIST[@]} images into Kind node (background)..."
     (
-      LOAD_FAIL=0
-      for img in "${PRELOAD_LIST[@]}"; do
-        tmp=$(mktemp /tmp/kind-preload.XXXXXX)
-        if $CONTAINER_ENGINE save "$img" -o "$tmp" 2>/dev/null && \
-           $CONTAINER_ENGINE cp "$tmp" "${CLUSTER_NAME}-control-plane:/$( basename "$tmp")" 2>/dev/null && \
-           $CONTAINER_ENGINE exec "${CLUSTER_NAME}-control-plane" \
-             ctr --namespace=k8s.io images import "/$( basename "$tmp")" >/dev/null 2>&1; then
-          :
-        else
-          LOAD_FAIL=1
-        fi
-        $CONTAINER_ENGINE exec "${CLUSTER_NAME}-control-plane" rm -f "/$( basename "$tmp")" 2>/dev/null || true
-        rm -f "$tmp"
-      done
-      exit $LOAD_FAIL
+      tmp=$(mktemp /tmp/kind-preload-XXXXXX.tar)
+      trap 'rm -f "$tmp"' EXIT
+      if $CONTAINER_ENGINE save "${PRELOAD_LIST[@]}" -o "$tmp" 2>/dev/null && \
+         $CONTAINER_ENGINE cp "$tmp" "${CLUSTER_NAME}-control-plane:/preload-images.tar" 2>/dev/null && \
+         $CONTAINER_ENGINE exec "${CLUSTER_NAME}-control-plane" \
+           ctr --namespace=k8s.io images import /preload-images.tar >/dev/null 2>&1; then
+        $CONTAINER_ENGINE exec "${CLUSTER_NAME}-control-plane" rm -f /preload-images.tar 2>/dev/null || true
+        exit 0
+      else
+        $CONTAINER_ENGINE exec "${CLUSTER_NAME}-control-plane" rm -f /preload-images.tar 2>/dev/null || true
+        exit 1
+      fi
     ) &
     PRELOAD_LOAD_PID=$!
   fi
