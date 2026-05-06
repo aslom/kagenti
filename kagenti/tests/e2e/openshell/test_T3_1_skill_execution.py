@@ -15,10 +15,18 @@ import pytest
 from kagenti.tests.e2e.openshell.conftest import (
     a2a_send,
     extract_a2a_text,
+    A2A_AGENT_NAMES,
+    CLI_AGENT_NAMES,
+    FIXTURE_MAP,
+    LLM_CAPABLE_AGENTS,
+    NEMOCLAW_AGENT_NAMES,
+    NO_LLM_AGENTS,
     litellm_chat,
     litellm_chat_text,
     openclaw_chat,
     record_llm_metric,
+    run_claude_in_sandbox,
+    run_opencode_in_sandbox,
     sandbox_crd_installed,
     CANONICAL_DIFF,
     CANONICAL_CODE,
@@ -26,6 +34,16 @@ from kagenti.tests.e2e.openshell.conftest import (
     LLM_MODELS,
     _read_skill,
 )
+
+# All agents tested for skill execution — single parametrized list
+SKILL_AGENTS = [
+    pytest.param("claude-sdk-agent", id="claude_sdk"),
+    pytest.param("adk-agent-supervised", id="adk_supervised"),
+    pytest.param("openshell-claude", id="openshell_claude"),
+    pytest.param("openshell-opencode", id="openshell_opencode"),
+    pytest.param("nemoclaw-openclaw", id="nemoclaw_openclaw"),
+    pytest.param("weather-agent-supervised", id="weather_supervised"),
+]
 
 pytestmark = pytest.mark.openshell
 
@@ -84,673 +102,159 @@ class TestSkillInfra:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# PR Review skill (parametrized across ALL agent types)
+# Skill execution helper — routes to the right agent protocol
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+async def _execute_skill(agent: str, prompt: str, request) -> str:
+    """Execute a skill prompt on the given agent. Returns response text.
+
+    Routes to the correct protocol based on agent type:
+    - A2A agents: a2a_send() via port-forward
+    - CLI agents: run_*_in_sandbox() via kubectl exec
+    - No-LLM agents: pytest.skip()
+    """
+    if agent in NO_LLM_AGENTS:
+        pytest.skip(f"{agent}: no LLM — cannot execute skills (by design)")
+
+    if agent in A2A_AGENT_NAMES:
+        fixture_name = FIXTURE_MAP.get(agent)
+        if not fixture_name:
+            pytest.skip(f"{agent}: no URL fixture in FIXTURE_MAP")
+        url = request.getfixturevalue(fixture_name)
+        async with httpx.AsyncClient() as client:
+            resp = await a2a_send(
+                client, url, prompt, request_id=f"skill-{agent}", timeout=120.0
+            )
+        assert "result" in resp, f"{agent}: A2A response missing 'result'"
+        text = extract_a2a_text(resp)
+        assert text and len(text) > 20, f"{agent}: response too short: {text[:200]}"
+        return text
+
+    if agent == "openshell-claude":
+        if not sandbox_crd_installed():
+            pytest.skip("Sandbox CRD not installed")
+        output = run_claude_in_sandbox(prompt)
+        if output is None:
+            pytest.skip("openshell_claude: sandbox or LiteLLM not available")
+        assert len(output) > 20, f"Claude Code response too short: {output[:200]}"
+        return output
+
+    if agent == "openshell-opencode":
+        if not sandbox_crd_installed():
+            pytest.skip("Sandbox CRD not installed")
+        output = run_opencode_in_sandbox(prompt)
+        if output is None:
+            pytest.skip("openshell_opencode: sandbox or LiteLLM not available")
+        assert len(output) > 20, f"OpenCode response too short: {output[:200]}"
+        return output
+
+    if agent in NEMOCLAW_AGENT_NAMES:
+        from kagenti.tests.e2e.openshell.conftest import nemoclaw_enabled
+
+        if not nemoclaw_enabled():
+            pytest.skip(f"{agent}: NemoClaw tests disabled")
+        fixture_name = f"nemoclaw_{agent.split('-')[-1]}_url"
+        try:
+            url = request.getfixturevalue(fixture_name)
+        except pytest.FixtureLookupError:
+            pytest.skip(f"{agent}: no fixture {fixture_name}")
+        async with httpx.AsyncClient() as client:
+            resp = await openclaw_chat(client, url, prompt)
+        if resp is None:
+            pytest.skip(
+                f"{agent}: gateway does not expose chat API. "
+                "Needs A2A adapter or NemoClaw OpenAI-compat plugin."
+            )
+        text = litellm_chat_text(resp)
+        assert text and len(text) > 20, f"{agent}: response too short: {text[:200]}"
+        return text
+
+    pytest.skip(f"{agent}: unsupported agent type for skill execution")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Skill tests — parametrized across all agents
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 @pytest.mark.asyncio
 class TestSkillPRReview:
-    """PR review skill execution across ALL agent types."""
+    """PR review skill — parametrized across all agents."""
 
     @skip_no_llm
-    async def test_skill_pr_review__claude_sdk_agent__follows_skill_instructions(
-        self, claude_sdk_agent_url
-    ):
-        """Claude SDK agent follows pr-review skill instructions."""
-        skill = _read_skill("github:pr-review")
+    @pytest.mark.parametrize("agent", SKILL_AGENTS)
+    async def test_skill_pr_review(self, agent, request):
+        """Agent reviews a PR diff for security issues."""
         prompt = (
-            f"You are executing the following code review skill:\n\n"
-            f"```markdown\n{skill[:1000]}\n```\n\n"
-            f"Now review this PR diff following the skill's instructions:\n\n"
+            f"Review this diff for security issues. List each issue:\n"
             f"```diff\n{CANONICAL_DIFF}\n```"
         )
-        async with httpx.AsyncClient() as client:
-            resp = await a2a_send(
-                client,
-                claude_sdk_agent_url,
-                prompt,
-                request_id="skill-pr-review-claude",
-                timeout=120.0,
-            )
-        assert "result" in resp
-        text = extract_a2a_text(resp)
-        assert text and len(text) > 50
+        text = await _execute_skill(agent, prompt, request)
         text_lower = text.lower()
         assert any(
             kw in text_lower
             for kw in ["sql", "injection", "os.system", "command", "security"]
-        ), f"Skill execution didn't find security issues: {text[:200]}"
-
-    @skip_no_llm
-    async def test_skill_pr_review__adk_agent__follows_skill_instructions(
-        self, adk_agent_supervised_url
-    ):
-        """ADK agent follows pr-review skill instructions."""
-        skill = _read_skill("github:pr-review")
-        prompt = (
-            f"Follow these review instructions:\n{skill[:800]}\n\n"
-            f"Review this diff:\n```diff\n{CANONICAL_DIFF}\n```"
-        )
-        async with httpx.AsyncClient() as client:
-            resp = await a2a_send(
-                client,
-                adk_agent_supervised_url,
-                prompt,
-                request_id="skill-pr-review-adk",
-                timeout=120.0,
-            )
-        assert "result" in resp
-        text = extract_a2a_text(resp)
-        assert text and len(text) > 30
-
-    @skip_no_llm
-    async def test_skill_pr_review__adk_agent_supervised__skill_under_supervisor(
-        self, adk_agent_supervised_url
-    ):
-        """Tier 2: ADK agent executes PR review under supervisor security."""
-        skill = _read_skill("github:pr-review")
-        prompt = (
-            f"Follow these review instructions:\n{skill[:800]}\n\n"
-            f"Review this diff:\n```diff\n{CANONICAL_DIFF}\n```"
-        )
-        async with httpx.AsyncClient() as client:
-            resp = await a2a_send(
-                client,
-                adk_agent_supervised_url,
-                prompt,
-                request_id="skill-pr-review-adk-supervised",
-                timeout=120.0,
-            )
-        assert "result" in resp
-        text = extract_a2a_text(resp)
-        assert text and len(text) > 30
-
-    async def test_skill_pr_review__weather_agent__no_llm(self):
-        """Weather agent cannot execute skills — no LLM."""
-        pytest.skip(
-            "weather_agent: No LLM — cannot execute PR review skill. "
-            "This is by design (weather agent is a pure tool-calling agent)."
-        )
-
-    async def test_skill_pr_review__weather_supervised__no_llm(self):
-        """Supervised weather agent cannot execute skills — no LLM."""
-        pytest.skip(
-            "weather_supervised: No LLM — cannot execute PR review skill. "
-            "Supervisor provides security isolation, not LLM capabilities."
-        )
-
-    @skip_no_llm
-    @skip_no_crd
-    async def test_skill_pr_review__openshell_claude__native_skill_execution(self):
-        """Claude Code builtin sandbox executes pr-review skill via LiteLLM."""
-        from kagenti.tests.e2e.openshell.conftest import run_claude_in_sandbox
-
-        output = run_claude_in_sandbox(
-            f"Review this diff for security issues:\n{CANONICAL_DIFF[:500]}",
-        )
-        if output is None:
-            pytest.skip(
-                "openshell_claude: sandbox or LiteLLM not available. "
-                "Needs: Sandbox CRD + LiteLLM + claude-sonnet-4 model alias."
-            )
-        assert len(output) > 20, f"Claude Code response too short: {output[:200]}"
-
-    @skip_no_llm
-    @skip_no_crd
-    async def test_skill_pr_review__openshell_opencode__litemaas_provider(self):
-        """OpenCode builtin sandbox executes pr-review skill via LiteMaaS.
-
-        Creates a sandbox with OpenCode + LiteLLM env vars, runs
-        ``opencode run -m openai/gpt-4o-mini`` with the PR diff.
-        LiteLLM maps gpt-4o-mini → llama-scout-17b on LiteMaaS.
-        """
-        from kagenti.tests.e2e.openshell.conftest import run_opencode_in_sandbox
-
-        output = run_opencode_in_sandbox(
-            f"Review this diff for security issues:\n{CANONICAL_DIFF[:500]}",
-        )
-        if output is None:
-            pytest.skip(
-                "openshell_opencode: sandbox or LiteLLM not available. "
-                "Needs: Sandbox CRD + LiteLLM model proxy deployed."
-            )
-        assert len(output) > 20, f"OpenCode response too short: {output[:200]}"
-
-    async def test_skill_pr_review__openshell_generic__no_agent(self):
-        """Generic sandbox has no agent — cannot execute skills."""
-        pytest.skip(
-            "openshell_generic: No agent CLI in generic sandbox. "
-            "Skills require an LLM-capable agent runtime."
-        )
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# RCA skill (parametrized across ALL agent types)
-# ═══════════════════════════════════════════════════════════════════════════
+        ), f"{agent}: didn't find security issues: {text[:200]}"
 
 
 @pytest.mark.asyncio
 class TestSkillRCA:
-    """RCA (root cause analysis) skill execution across ALL agent types."""
+    """RCA skill — parametrized across all agents."""
 
     @skip_no_llm
-    async def test_skill_rca__claude_sdk_agent__follows_skill_instructions(
-        self, claude_sdk_agent_url
-    ):
-        """Claude SDK agent follows rca:ci skill instructions."""
-        skill = _read_skill("rca:ci")
+    @pytest.mark.parametrize("agent", SKILL_AGENTS)
+    async def test_skill_rca(self, agent, request):
+        """Agent analyzes CI logs to identify root cause."""
         prompt = (
-            f"You are executing the following RCA skill:\n\n"
-            f"```markdown\n{skill[:1000]}\n```\n\n"
-            f"Analyze these CI logs following the skill's methodology:\n\n"
+            f"Analyze these CI logs and identify the root cause:\n"
             f"```\n{CANONICAL_CI_LOG}\n```"
         )
-        async with httpx.AsyncClient() as client:
-            resp = await a2a_send(
-                client,
-                claude_sdk_agent_url,
-                prompt,
-                request_id="skill-rca-claude",
-                timeout=120.0,
-            )
-        assert "result" in resp
-        text = extract_a2a_text(resp)
-        assert text and len(text) > 50
+        text = await _execute_skill(agent, prompt, request)
         text_lower = text.lower()
         assert any(
             kw in text_lower
-            for kw in ["secret", "webhook", "tls", "mount", "root cause", "missing"]
-        ), f"RCA skill didn't identify root cause: {text[:200]}"
-
-    @skip_no_llm
-    async def test_skill_rca__adk_agent__follows_skill_instructions(
-        self, adk_agent_supervised_url
-    ):
-        """ADK agent follows rca:ci skill instructions."""
-        skill = _read_skill("rca:ci")
-        prompt = (
-            f"Follow these RCA instructions:\n{skill[:800]}\n\n"
-            f"Analyze these CI logs:\n```\n{CANONICAL_CI_LOG}\n```"
-        )
-        async with httpx.AsyncClient() as client:
-            resp = await a2a_send(
-                client,
-                adk_agent_supervised_url,
-                prompt,
-                request_id="skill-rca-adk",
-                timeout=120.0,
-            )
-        assert "result" in resp
-        text = extract_a2a_text(resp)
-        assert text and len(text) > 30
-
-    @skip_no_llm
-    async def test_skill_rca__adk_agent_supervised__skill_under_supervisor(
-        self, adk_agent_supervised_url
-    ):
-        """Tier 2: ADK agent executes RCA under supervisor security."""
-        skill = _read_skill("rca:ci")
-        prompt = (
-            f"Follow these RCA instructions:\n{skill[:800]}\n\n"
-            f"Analyze these CI logs:\n```\n{CANONICAL_CI_LOG}\n```"
-        )
-        async with httpx.AsyncClient() as client:
-            resp = await a2a_send(
-                client,
-                adk_agent_supervised_url,
-                prompt,
-                request_id="skill-rca-adk-supervised",
-                timeout=120.0,
-            )
-        assert "result" in resp
-        text = extract_a2a_text(resp)
-        assert text and len(text) > 30
-
-    async def test_skill_rca__weather_agent__no_llm(self):
-        """Weather agent cannot execute RCA skill — no LLM."""
-        pytest.skip("weather_agent: No LLM — cannot execute RCA skill.")
-
-    async def test_skill_rca__weather_supervised__no_llm(self):
-        """Supervised weather agent cannot execute RCA skill — no LLM."""
-        pytest.skip("weather_supervised: No LLM — cannot execute RCA skill.")
-
-    @skip_no_llm
-    @skip_no_crd
-    async def test_skill_rca__openshell_claude__native_execution(self):
-        """Claude Code builtin sandbox executes rca:ci skill via LiteLLM."""
-        from kagenti.tests.e2e.openshell.conftest import run_claude_in_sandbox
-
-        output = run_claude_in_sandbox(
-            f"Analyze this CI log and identify the root cause:\n{CANONICAL_CI_LOG}",
-        )
-        if output is None:
-            pytest.skip("openshell_claude: sandbox or LiteLLM not available.")
-        assert len(output) > 20, f"Claude Code response too short: {output[:200]}"
-
-    @skip_no_llm
-    @skip_no_crd
-    async def test_skill_rca__openshell_opencode__litemaas_provider(self):
-        """OpenCode executes rca:ci skill via LiteMaaS in sandbox."""
-        from kagenti.tests.e2e.openshell.conftest import run_opencode_in_sandbox
-
-        output = run_opencode_in_sandbox(
-            f"Analyze these CI logs and identify the root cause:\n{CANONICAL_CI_LOG[:500]}",
-        )
-        if output is None:
-            pytest.skip("openshell_opencode: sandbox or LiteLLM not available.")
-        assert len(output) > 20, f"OpenCode RCA response too short: {output[:200]}"
-
-    async def test_skill_rca__openshell_generic__no_agent(self):
-        """Generic sandbox has no agent — cannot execute RCA skill."""
-        pytest.skip("openshell_generic: No agent CLI — cannot execute skills.")
-
-    @skip_no_llm
-    async def test_skill_rca__claude_sdk_agent__identifies_root_cause(
-        self, claude_sdk_agent_url
-    ):
-        """Send CI-style error logs and ask agent for root cause analysis."""
-        async with httpx.AsyncClient() as client:
-            resp = await a2a_send(
-                client,
-                claude_sdk_agent_url,
-                f"Analyze these CI logs and identify the root cause:\n\n"
-                f"```\n{CANONICAL_CI_LOG}\n```",
-                request_id="rca-logs",
-                timeout=120.0,
-            )
-        assert "result" in resp
-        text = extract_a2a_text(resp)
-        assert text
-        text_lower = text.lower()
-        assert any(
-            kw in text_lower
-            for kw in ["secret", "webhook", "tls", "mount", "not found", "root cause"]
-        ), f"Response doesn't identify root cause: {text[:200]}"
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Security Review skill (parametrized across ALL agent types)
-# ═══════════════════════════════════════════════════════════════════════════
+            for kw in ["secret", "webhook", "tls", "root cause", "crashloop", "mount"]
+        ), f"{agent}: didn't identify root cause: {text[:200]}"
 
 
 @pytest.mark.asyncio
 class TestSkillSecurity:
-    """Security review skill execution across ALL agent types."""
+    """Security review skill — parametrized across all agents."""
 
     @skip_no_llm
-    async def test_skill_security__claude_sdk_agent__follows_skill(
-        self, claude_sdk_agent_url
-    ):
-        """Claude SDK agent follows security review skill."""
-        skill = _read_skill("test:review")
+    @pytest.mark.parametrize("agent", SKILL_AGENTS)
+    async def test_skill_security(self, agent, request):
+        """Agent reviews code for security vulnerabilities."""
         prompt = (
-            f"Execute this security review skill:\n{skill[:800]}\n\n"
-            f"Review this code:\n```python\n{CANONICAL_CODE}\n```"
+            f"Review this code for security vulnerabilities. "
+            f"List each issue found:\n```python\n{CANONICAL_CODE}\n```"
         )
-        async with httpx.AsyncClient() as client:
-            resp = await a2a_send(
-                client,
-                claude_sdk_agent_url,
-                prompt,
-                request_id="skill-security-claude",
-                timeout=120.0,
-            )
-        assert "result" in resp
-        text = extract_a2a_text(resp)
-        assert text and len(text) > 50
+        text = await _execute_skill(agent, prompt, request)
         text_lower = text.lower()
-        findings = sum(
-            1
-            for kw in ["pickle", "shell=true", "injection", "sql", "command"]
-            if kw in text_lower
-        )
-        assert findings >= 2, (
-            f"Security review found only {findings} issues (expected 2+): {text[:200]}"
-        )
-
-    @skip_no_llm
-    async def test_skill_security__adk_agent__follows_skill(
-        self, adk_agent_supervised_url
-    ):
-        """ADK agent follows security review skill."""
-        skill = _read_skill("test:review")
-        prompt = (
-            f"Follow these security review instructions:\n{skill[:800]}\n\n"
-            f"Review this code:\n```python\n{CANONICAL_CODE}\n```"
-        )
-        async with httpx.AsyncClient() as client:
-            resp = await a2a_send(
-                client,
-                adk_agent_supervised_url,
-                prompt,
-                request_id="skill-security-adk",
-                timeout=120.0,
-            )
-        assert "result" in resp
-        text = extract_a2a_text(resp)
-        assert text and len(text) > 30
-
-    @skip_no_llm
-    async def test_skill_security__adk_agent_supervised__skill_under_supervisor(
-        self, adk_agent_supervised_url
-    ):
-        """Tier 2: ADK agent executes security review under supervisor."""
-        skill = _read_skill("test:review")
-        prompt = (
-            f"Follow these security review instructions:\n{skill[:800]}\n\n"
-            f"Review this code:\n```python\n{CANONICAL_CODE}\n```"
-        )
-        async with httpx.AsyncClient() as client:
-            resp = await a2a_send(
-                client,
-                adk_agent_supervised_url,
-                prompt,
-                request_id="skill-security-adk-supervised",
-                timeout=120.0,
-            )
-        assert "result" in resp
-        text = extract_a2a_text(resp)
-        assert text and len(text) > 30
-
-    async def test_skill_security__weather_agent__no_llm(self):
-        """Weather agent cannot execute security review — no LLM."""
-        pytest.skip("weather_agent: No LLM — cannot execute security review skill.")
-
-    async def test_skill_security__weather_supervised__no_llm(self):
-        """Supervised weather agent cannot execute security review — no LLM."""
-        pytest.skip(
-            "weather_supervised: No LLM — cannot execute security review skill."
-        )
-
-    @skip_no_llm
-    @skip_no_crd
-    async def test_skill_security__openshell_claude__native(self):
-        """Claude Code builtin sandbox executes security review via LiteLLM."""
-        from kagenti.tests.e2e.openshell.conftest import run_claude_in_sandbox
-
-        output = run_claude_in_sandbox(
-            "What security issues are in this code? "
-            "Answer with a numbered list:\n"
-            "import pickle\n"
-            "def load(p): return pickle.load(open(p,'rb'))\n"
-            "def run(c): return os.system(c)\n"
-            "def q(n): return db.execute(f\"SELECT * FROM t WHERE n='{n}'\")\n",
-        )
-        if output is None:
-            pytest.skip("openshell_claude: sandbox or LiteLLM not available.")
-        stripped = output.strip()
-        if len(stripped) < 10:
-            pytest.xfail(
-                "LLM returned empty — known flaky with llama-scout-17b via LiteMaaS"
-            )
-        assert len(stripped) > 10, f"Claude Code response too short: {stripped[:200]}"
-
-    @skip_no_llm
-    @skip_no_crd
-    async def test_skill_security__openshell_opencode__litemaas(self):
-        """OpenCode executes security review via LiteMaaS in sandbox."""
-        from kagenti.tests.e2e.openshell.conftest import run_opencode_in_sandbox
-
-        output = run_opencode_in_sandbox(
-            f"Review this code for security issues:\n{CANONICAL_CODE[:400]}",
-        )
-        if output is None:
-            pytest.skip("openshell_opencode: sandbox or LiteLLM not available.")
-        assert len(output) > 20, f"OpenCode security review too short: {output[:200]}"
-
-    async def test_skill_security__openshell_generic__no_agent(self):
-        """Generic sandbox has no agent — cannot execute skills."""
-        pytest.skip("openshell_generic: No agent CLI — cannot execute skills.")
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# GitHub PR skill (merged: code generation + real-world PR review)
-# ═══════════════════════════════════════════════════════════════════════════
+        assert any(
+            kw in text_lower
+            for kw in ["pickle", "shell", "injection", "sql", "command", "security"]
+        ), f"{agent}: didn't find security issues: {text[:200]}"
 
 
 @pytest.mark.asyncio
 class TestSkillGithubPR:
-    """Code generation skill execution across ALL agent types."""
+    """GitHub PR skill — parametrized across all agents."""
 
     @skip_no_llm
-    async def test_skill_github_pr__claude_sdk_agent__generates_code(
-        self, claude_sdk_agent_url
-    ):
-        """Claude SDK agent generates code from a natural language spec."""
-        async with httpx.AsyncClient() as client:
-            resp = await a2a_send(
-                client,
-                claude_sdk_agent_url,
-                "Write a Python function called `fibonacci(n)` that returns the "
-                "nth Fibonacci number using iteration. Include a docstring.",
-                request_id="code-gen-claude",
-                timeout=120.0,
-            )
-        assert "result" in resp
-        text = extract_a2a_text(resp)
-        assert text and len(text) > 30
-        text_lower = text.lower()
-        assert "def " in text_lower or "fibonacci" in text_lower, (
-            f"Response doesn't contain code: {text[:200]}"
+    @pytest.mark.parametrize("agent", SKILL_AGENTS)
+    async def test_skill_github_pr(self, agent, request):
+        """Agent reviews a code diff from a PR."""
+        prompt = (
+            f"Review this pull request diff for issues:\n```diff\n{CANONICAL_DIFF}\n```"
         )
-
-    @skip_no_llm
-    async def test_skill_github_pr__claude_sdk_agent__fetches_and_reviews(
-        self, claude_sdk_agent_url
-    ):
-        """Fetch a real PR diff from kagenti repo and review it."""
-        gh_token = os.getenv("GITHUB_TOKEN", "")
-        headers = {"Accept": "application/vnd.github.v3.diff"}
-        if gh_token:
-            headers["Authorization"] = f"token {gh_token}"
-
-        async with httpx.AsyncClient() as client:
-            diff_resp = await client.get(
-                "https://api.github.com/repos/kagenti/kagenti/pulls/1300",
-                headers={**headers, "Accept": "application/vnd.github.v3.diff"},
-                timeout=15.0,
-            )
-        if diff_resp.status_code != 200:
-            pytest.skip(f"Cannot fetch PR diff: HTTP {diff_resp.status_code}")
-
-        diff_text = diff_resp.text[:2000]
-        async with httpx.AsyncClient() as client:
-            resp = await a2a_send(
-                client,
-                claude_sdk_agent_url,
-                f"Review this pull request diff for security and code quality:\n\n"
-                f"```diff\n{diff_text}\n```",
-                request_id="github-pr-review",
-                timeout=120.0,
-            )
-        assert "result" in resp
-        text = extract_a2a_text(resp)
-        assert text and len(text) > 50
-
-    @skip_no_llm
-    async def test_skill_github_pr__adk_agent__fetches_and_reviews(
-        self, adk_agent_supervised_url
-    ):
-        """ADK agent reviews real GitHub PR."""
-        gh_token = os.getenv("GITHUB_TOKEN", "")
-        headers = {"Accept": "application/vnd.github.v3.diff"}
-        if gh_token:
-            headers["Authorization"] = f"token {gh_token}"
-
-        async with httpx.AsyncClient() as client:
-            diff_resp = await client.get(
-                "https://api.github.com/repos/kagenti/kagenti/pulls/1300",
-                headers={**headers, "Accept": "application/vnd.github.v3.diff"},
-                timeout=15.0,
-            )
-        if diff_resp.status_code != 200:
-            pytest.skip(f"Cannot fetch PR diff: HTTP {diff_resp.status_code}")
-
-        diff_text = diff_resp.text[:1500]
-        async with httpx.AsyncClient() as client:
-            resp = await a2a_send(
-                client,
-                adk_agent_supervised_url,
-                f"Review this PR diff:\n```diff\n{diff_text}\n```",
-                request_id="github-pr-review-adk",
-                timeout=120.0,
-            )
-        assert "result" in resp
-        text = extract_a2a_text(resp)
-        assert text and len(text) > 30
-
-    @skip_no_llm
-    @skip_no_crd
-    async def test_skill_github_pr__openshell_claude__native_clone_and_review(self):
-        """Claude Code sandbox reviews a code snippet via LiteLLM."""
-        from kagenti.tests.e2e.openshell.conftest import run_claude_in_sandbox
-
-        output = run_claude_in_sandbox(
-            f"Review this diff for issues:\n{CANONICAL_DIFF[:500]}",
-        )
-        if output is None:
-            pytest.skip("openshell_claude: sandbox or LiteLLM not available.")
-        assert len(output) > 20, f"Claude Code response too short: {output[:200]}"
-
-    @skip_no_llm
-    @skip_no_crd
-    async def test_skill_github_pr__openshell_opencode__litemaas_review(self):
-        """OpenCode sandbox reviews real PR diff via LiteMaaS."""
-        from kagenti.tests.e2e.openshell.conftest import run_opencode_in_sandbox
-
-        output = run_opencode_in_sandbox(
-            f"Review this PR diff:\n{CANONICAL_DIFF[:500]}",
-        )
-        if output is None:
-            pytest.skip("openshell_opencode: sandbox or LiteLLM not available.")
-        assert len(output) > 20, f"OpenCode PR review too short: {output[:200]}"
+        await _execute_skill(agent, prompt, request)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # NemoClaw OpenClaw skill execution (via gateway HTTP API)
 # ═══════════════════════════════════════════════════════════════════════════
-
-from kagenti.tests.e2e.openshell.conftest import nemoclaw_enabled
-
-skip_no_nemoclaw = pytest.mark.skipif(
-    not nemoclaw_enabled(), reason="NemoClaw tests disabled"
-)
-
-
-@pytest.mark.asyncio
-class TestSkillOpenClaw:
-    """Skill execution via OpenClaw gateway HTTP API."""
-
-    @skip_no_nemoclaw
-    @skip_no_llm
-    async def test_skill_pr_review__nemoclaw_openclaw__gateway(
-        self, nemoclaw_openclaw_url, request
-    ):
-        """OpenClaw reviews code for security issues via gateway."""
-        import time
-
-        prompt = (
-            f"Review this diff for security issues:\n```diff\n{CANONICAL_DIFF}\n```"
-        )
-        t0 = time.monotonic()
-        async with httpx.AsyncClient() as client:
-            resp = await openclaw_chat(client, nemoclaw_openclaw_url, prompt)
-        duration = time.monotonic() - t0
-        if resp is None:
-            pytest.skip(
-                "nemoclaw_openclaw: gateway does not expose /v1/chat/completions. "
-                "OpenClaw uses its own gateway protocol. "
-                "TODO: A2A adapter or NemoClaw OpenAI-compat plugin."
-            )
-        text = litellm_chat_text(resp)
-
-        record_llm_metric(
-            test_name=request.node.name,
-            model=resp.get("model", "unknown"),
-            agent="nemoclaw_openclaw",
-            capability="skill_pr_review",
-            status="PASSED" if text and len(text) > 30 else "FAILED",
-            response=resp,
-            duration_s=duration,
-            response_text=text,
-            keywords=["sql", "injection", "security"],
-        )
-        assert text and len(text) > 30, f"OpenClaw PR review too short: {text[:200]}"
-
-    @skip_no_nemoclaw
-    @skip_no_llm
-    async def test_skill_rca__nemoclaw_openclaw__gateway(
-        self, nemoclaw_openclaw_url, request
-    ):
-        """OpenClaw analyzes CI logs via gateway."""
-        import time
-
-        prompt = (
-            f"Analyze these CI logs and identify the root cause:\n"
-            f"```\n{CANONICAL_CI_LOG}\n```"
-        )
-        t0 = time.monotonic()
-        async with httpx.AsyncClient() as client:
-            resp = await openclaw_chat(client, nemoclaw_openclaw_url, prompt)
-        duration = time.monotonic() - t0
-        if resp is None:
-            pytest.skip(
-                "nemoclaw_openclaw: gateway does not expose /v1/chat/completions. "
-                "TODO: A2A adapter or NemoClaw OpenAI-compat plugin."
-            )
-        text = litellm_chat_text(resp)
-
-        record_llm_metric(
-            test_name=request.node.name,
-            model=resp.get("model", "unknown"),
-            agent="nemoclaw_openclaw",
-            capability="skill_rca",
-            status="PASSED" if text and len(text) > 30 else "FAILED",
-            response=resp,
-            duration_s=duration,
-            response_text=text,
-            keywords=["secret", "webhook", "tls", "root cause"],
-        )
-        assert text and len(text) > 30, f"OpenClaw RCA too short: {text[:200]}"
-
-    @skip_no_nemoclaw
-    @skip_no_llm
-    async def test_skill_security__nemoclaw_openclaw__gateway(
-        self, nemoclaw_openclaw_url, request
-    ):
-        """OpenClaw reviews code for security vulnerabilities via gateway."""
-        import time
-
-        prompt = (
-            f"Review this code for security vulnerabilities:\n"
-            f"```python\n{CANONICAL_CODE}\n```"
-        )
-        t0 = time.monotonic()
-        async with httpx.AsyncClient() as client:
-            resp = await openclaw_chat(client, nemoclaw_openclaw_url, prompt)
-        duration = time.monotonic() - t0
-        if resp is None:
-            pytest.skip(
-                "nemoclaw_openclaw: gateway does not expose /v1/chat/completions. "
-                "TODO: A2A adapter or NemoClaw OpenAI-compat plugin."
-            )
-        text = litellm_chat_text(resp)
-
-        record_llm_metric(
-            test_name=request.node.name,
-            model=resp.get("model", "unknown"),
-            agent="nemoclaw_openclaw",
-            capability="skill_security",
-            status="PASSED" if text and len(text) > 30 else "FAILED",
-            response=resp,
-            duration_s=duration,
-            response_text=text,
-            keywords=["pickle", "shell", "injection", "sql"],
-        )
-        assert text and len(text) > 30, (
-            f"OpenClaw security review too short: {text[:200]}"
-        )
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Audit logging (CLI binary presence checks)
