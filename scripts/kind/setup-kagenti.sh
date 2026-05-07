@@ -1251,9 +1251,13 @@ if $WITH_SPIRE; then
 fi
 echo ""
 echo "  Credentials:"
-KC_ADMIN_USER=$(kubectl get secret keycloak-initial-admin -n keycloak -o jsonpath='{.data.username}' 2>/dev/null | base64 -d 2>/dev/null || echo "N/A")
-KC_ADMIN_PASS=$(kubectl get secret keycloak-initial-admin -n keycloak -o jsonpath='{.data.password}' 2>/dev/null | base64 -d 2>/dev/null || echo "N/A")
-echo "    Keycloak admin console: ${KC_ADMIN_USER} / ${KC_ADMIN_PASS}"
+KC_ADMIN_USER=$(kubectl get secret keycloak-initial-admin -n keycloak -o jsonpath='{.data.username}' 2>/dev/null | base64 -d 2>/dev/null)
+KC_ADMIN_PASS=$(kubectl get secret keycloak-initial-admin -n keycloak -o jsonpath='{.data.password}' 2>/dev/null | base64 -d 2>/dev/null)
+if [ -n "$KC_ADMIN_PASS" ]; then
+  echo "    Keycloak admin console: ${KC_ADMIN_USER} / ${KC_ADMIN_PASS}"
+else
+  echo "    Keycloak admin console: (pending — secret keycloak-initial-admin not ready)"
+fi
 if $WITH_UI; then
   UI_USER=$(kubectl get secret kagenti-test-user -n keycloak -o jsonpath='{.data.username}' 2>/dev/null | base64 -d 2>/dev/null || echo "")
   UI_PASS=$(kubectl get secret kagenti-test-user -n keycloak -o jsonpath='{.data.password}' 2>/dev/null | base64 -d 2>/dev/null || echo "")
