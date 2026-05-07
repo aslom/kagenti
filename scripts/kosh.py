@@ -68,7 +68,6 @@ OPENSHELL_PASSTHROUGH = [
     "inference",
     "doctor",
     "term",
-    "completions",
     "ssh-proxy",
 ]
 
@@ -116,6 +115,34 @@ def cli() -> None:
 
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
 TELEPORT_SH = SCRIPT_DIR / "teleport.sh"
+DEFAULT_MODEL = "aws/claude-opus-4-6"
+
+
+@cli.command()
+@click.argument("shell", type=click.Choice(["bash", "zsh", "fish"]), default="zsh")
+def completions(shell: str) -> None:
+    """Generate shell completions for kosh.
+
+    Prints a completion script to stdout. Add to your shell profile:
+
+    \b
+        # zsh — add to ~/.zshrc
+        eval "$(kosh completions zsh)"
+    \b
+        # bash — add to ~/.bashrc
+        eval "$(kosh completions bash)"
+    \b
+        # fish — add to fish config
+        kosh completions fish | source
+    """
+    from click.shell_completion import get_completion_class
+
+    comp_cls = get_completion_class(shell)
+    if comp_cls is None:
+        click.echo(f"error: unsupported shell: {shell}", err=True)
+        sys.exit(1)
+    comp = comp_cls(cli, {}, "kosh", "_KOSH_COMPLETE")
+    click.echo(comp.source())
 
 
 @cli.command()
@@ -123,7 +150,9 @@ TELEPORT_SH = SCRIPT_DIR / "teleport.sh"
 @click.option("--openshell-bin", default=None, help="Path to openshell binary.")
 @click.option("--xdg-config-home", default=None, help="Override XDG_CONFIG_HOME for gateway config.")
 @click.option("--connect/--no-connect", default=False, help="Connect to the sandbox after setup.")
-def teleport(directory: str | None, openshell_bin: str | None, xdg_config_home: str | None, connect: bool) -> None:
+@click.option("--custom-image", is_flag=True, default=False, help="Build sandbox from Dockerfile.sandbox (requires Docker).")
+@click.option("--model", default=DEFAULT_MODEL, show_default=True, help="Claude model to set as ANTHROPIC_MODEL.")
+def teleport(directory: str | None, openshell_bin: str | None, xdg_config_home: str | None, connect: bool, custom_image: bool, model: str) -> None:
     """Set up and sync a project into an OpenShell sandbox.
 
     Creates the litellm provider if needed, creates a sandbox named after the
@@ -164,6 +193,10 @@ def teleport(directory: str | None, openshell_bin: str | None, xdg_config_home: 
         env["OPENSHELL_BIN"] = openshell_bin
     if xdg_config_home:
         env["XDG_CONFIG_HOME"] = xdg_config_home
+    if custom_image:
+        env["KOSH_CUSTOM_IMAGE"] = "1"
+    if model != DEFAULT_MODEL:
+        env["KOSH_MODEL"] = model
 
     click.echo(f"Teleporting '{sandbox_name}' from {cwd_path}")
     result = _run(["bash", str(TELEPORT_SH)], cwd=str(cwd_path), env=env)
@@ -223,9 +256,11 @@ def local_sandbox() -> None:
     """Manage local macOS sandboxed environments."""
 
 
+
 @local_sandbox.command()
 @click.option("--name", required=True, help="Name for the local sandbox (used as directory name).")
-def create(name: str) -> None:
+@click.option("--model", default=DEFAULT_MODEL, show_default=True, help="Claude model to set as ANTHROPIC_MODEL.")
+def create(name: str, model: str) -> None:
     """Create a local sandbox directory and launch a sandboxed shell.
 
     Creates the directory in the current working directory if it doesn't
@@ -250,21 +285,37 @@ def create(name: str) -> None:
     else:
         click.echo(f"Directory {sandbox_dir} already exists.")
 
-    rc_content = (
-        'export ANTHROPIC_BASE_URL="https://ete-litellm.ai-models.vpc-int.res.ibm.com"\n'
-        "export CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1\n"
-    )
+    rc_lines = [
+        'export ANTHROPIC_BASE_URL="https://ete-litellm.ai-models.vpc-int.res.ibm.com"',
+        "export CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1",
+        f'export ANTHROPIC_MODEL="{model}"',
+    ]
+    rc_content = "\n".join(rc_lines) + "\n"
     for rc_name in (".bashrc", ".zshrc"):
         rc_path = sandbox_dir / rc_name
         if not rc_path.exists():
             rc_path.write_text(rc_content)
             click.echo(f"Created {rc_path}")
-        elif rc_content.splitlines()[0] not in rc_path.read_text():
-            with rc_path.open("a") as f:
-                f.write("\n" + rc_content)
-            click.echo(f"Updated {rc_path}")
         else:
-            click.echo(f"{rc_path} already configured.")
+            existing = rc_path.read_text()
+            added = False
+            for line in rc_lines:
+                key = line.split("=")[0]
+                if key not in existing:
+                    with rc_path.open("a") as f:
+                        f.write(line + "\n")
+                    added = True
+                elif "ANTHROPIC_MODEL" in key and f'"{model}"' not in existing:
+                    new_text = "\n".join(
+                        (line if l.startswith("export ANTHROPIC_MODEL=") else l)
+                        for l in existing.splitlines()
+                    ) + "\n"
+                    rc_path.write_text(new_text)
+                    added = True
+            if added:
+                click.echo(f"Updated {rc_path}")
+            else:
+                click.echo(f"{rc_path} already configured.")
 
     config_dir = _kosh_config_dir()
 
@@ -394,4 +445,4 @@ def delete(name: str) -> None:
 
 
 if __name__ == "__main__":
-    cli()
+    cli(prog_name="kosh")

@@ -8,6 +8,8 @@ DOCKERFILE="$SCRIPT_DIR/Dockerfile.sandbox"
 
 export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$WORKSPACE_ROOT/.config}"
 
+MODEL="${KOSH_MODEL:-aws/claude-opus-4-6}"
+
 run_cmd() {
   echo "+ $*" >&2
   "$@"
@@ -73,12 +75,16 @@ else
     echo "error: policy file not found: $POLICY_FILE" >&2
     exit 1
   fi
-  run_cmd "$OPENSHELL" sandbox create \
-    --name "$SANDBOX_NAME" \
-    --from "$DOCKERFILE" \
-    --policy "$POLICY_FILE" \
-    --provider litellm \
-    -- true
+  CREATE_ARGS=(
+    --name "$SANDBOX_NAME"
+    --policy "$POLICY_FILE"
+    --provider litellm
+  )
+  if [[ "${KOSH_CUSTOM_IMAGE:-}" == "1" && -f "$DOCKERFILE" ]]; then
+    echo "  Using custom Dockerfile: $DOCKERFILE"
+    CREATE_ARGS+=(--from "$DOCKERFILE")
+  fi
+  run_cmd "$OPENSHELL" sandbox create "${CREATE_ARGS[@]}" -- true
   echo "  Sandbox '$SANDBOX_NAME' created."
 fi
 
@@ -119,6 +125,13 @@ if ! run_cmd "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" -- grep -q "CLAUDE
   echo "  Adding CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS..."
   run_cmd "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" -- \
     sh -c "printf 'export CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1\n' >> $BASHRC"
+fi
+
+# Append ANTHROPIC_MODEL if missing
+if ! run_cmd "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" -- grep -q "ANTHROPIC_MODEL" "$BASHRC" 2>/dev/null; then
+  echo "  Adding ANTHROPIC_MODEL=$MODEL..."
+  run_cmd "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" -- \
+    sh -c "printf 'export ANTHROPIC_MODEL=\"$MODEL\"\n' >> $BASHRC"
 fi
 
 # Append export HOME=<uploaded dir> if missing
