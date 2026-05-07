@@ -91,6 +91,16 @@ jobs:
             });
             core.setOutput('sha', pr.head.sha);
 
+      - name: React with rocket
+        if: steps.check.outputs.has-permission == 'true' && github.event_name == 'issue_comment'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
+        with:
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner, repo: context.repo.repo,
+              comment_id: context.payload.comment.id, content: 'rocket'
+            });
+
       - name: Create pending commit status
         if: steps.check.outputs.has-permission == 'true' && github.event_name == 'issue_comment'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
@@ -104,16 +114,6 @@ jobs:
               target_url: runUrl,
               description: 'OpenShell E2E tests running on Kind',
               context: 'OpenShell PoC (Kind) [/run-e2e-openshell]'
-            });
-
-      - name: React with rocket
-        if: steps.check.outputs.has-permission == 'true' && github.event_name == 'issue_comment'
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
-        with:
-          script: |
-            await github.rest.reactions.createForIssueComment({
-              owner: context.repo.owner, repo: context.repo.repo,
-              comment_id: context.payload.comment.id, content: 'rocket'
             });
 
   # ── E2E Test Job ───────────────────────────────────────────────
@@ -171,6 +171,7 @@ jobs:
         run: uv sync --frozen
 
       - name: Run OpenShell full test
+        id: run-tests
         run: |
           SCRIPT="./.github/scripts/local-setup/openshell-full-test.sh"
           if [ ! -f "$SCRIPT" ]; then

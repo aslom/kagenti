@@ -70,9 +70,19 @@ jobs:
             core.setOutput('sha', pr.head.sha);
             core.setOutput('cluster_suffix', `ospr${pr.number}`);
 
+      - name: React with rocket
+        if: steps.check.outputs.has-permission == 'true' && github.event_name != 'workflow_dispatch'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
+        with:
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner, repo: context.repo.repo,
+              comment_id: context.payload.comment.id, content: 'rocket'
+            });
+
       - name: Create pending commit status
         if: steps.check.outputs.has-permission == 'true' && github.event_name != 'workflow_dispatch'
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea  # v7.0.1
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
         with:
           script: |
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
@@ -83,16 +93,6 @@ jobs:
               target_url: runUrl,
               description: 'OpenShell E2E tests running on HyperShift',
               context: 'OpenShell PoC (HyperShift)'
-            });
-
-      - name: React with rocket
-        if: steps.check.outputs.has-permission == 'true' && github.event_name != 'workflow_dispatch'
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
-        with:
-          script: |
-            await github.rest.reactions.createForIssueComment({
-              owner: context.repo.owner, repo: context.repo.repo,
-              comment_id: context.payload.comment.id, content: 'rocket'
             });
 
   e2e-openshell:
