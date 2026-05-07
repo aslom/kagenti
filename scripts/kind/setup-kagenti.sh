@@ -1250,8 +1250,19 @@ if $WITH_SPIRE; then
   echo "  Tornjak:      http://spire-tornjak-ui.${DOMAIN}:8080"
 fi
 echo ""
-echo "  Keycloak credentials:"
-echo "    kubectl get secret keycloak-initial-admin -n keycloak -o go-template='User: {{.data.username | base64decode}}  Pass: {{.data.password | base64decode}}'"
+echo "  Credentials:"
+KC_ADMIN_USER=$(kubectl get secret keycloak-initial-admin -n keycloak -o jsonpath='{.data.username}' 2>/dev/null | base64 -d 2>/dev/null || echo "N/A")
+KC_ADMIN_PASS=$(kubectl get secret keycloak-initial-admin -n keycloak -o jsonpath='{.data.password}' 2>/dev/null | base64 -d 2>/dev/null || echo "N/A")
+echo "    Keycloak admin console: ${KC_ADMIN_USER} / ${KC_ADMIN_PASS}"
+if $WITH_UI; then
+  UI_USER=$(kubectl get secret kagenti-test-user -n keycloak -o jsonpath='{.data.username}' 2>/dev/null | base64 -d 2>/dev/null || echo "")
+  UI_PASS=$(kubectl get secret kagenti-test-user -n keycloak -o jsonpath='{.data.password}' 2>/dev/null | base64 -d 2>/dev/null || echo "")
+  if [ -n "$UI_PASS" ]; then
+    echo "    Kagenti UI login:       ${UI_USER} / ${UI_PASS}"
+  else
+    echo "    Kagenti UI login:       (pending — run show-services.sh once platform is ready)"
+  fi
+fi
 echo ""
 
 ELAPSED=$(( SECONDS - START_SECONDS ))
