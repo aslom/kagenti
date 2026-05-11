@@ -4,6 +4,7 @@ filesystem_policy:
     - /sandbox
     - /tmp
     - /Users
+    - /dev
 network_policies:
   ibm_litellm:
     name: IBM LiteLLM
@@ -16,3 +17,78 @@ network_policies:
       - path: /usr/bin/curl
       - path: /usr/bin/node
       - path: /usr/local/bin/node
+  claude_code:
+    name: Claude Code infra
+    endpoints:
+      - host: api.anthropic.com
+        port: 443
+        access: full
+      - host: statsig.anthropic.com
+        port: 443
+      - host: sentry.io
+        port: 443
+      - host: platform.claude.com
+        port: 443
+    binaries:
+      - path: /usr/local/bin/claude
+      - path: /usr/bin/curl
+      - path: /usr/bin/node
+      - path: /usr/local/bin/node
+  web_search:
+    name: Web Search and Fetch
+    endpoints:
+      - host: "*.google.com"
+        port: 443
+      - host: google.com
+        port: 443
+      - host: "*.googleapis.com"
+        port: 443
+      - host: "*.bing.com"
+        port: 443
+      - host: bing.com
+        port: 443
+      - host: "*.duckduckgo.com"
+        port: 443
+      - host: duckduckgo.com
+        port: 443
+    binaries:
+      - path: /usr/local/bin/claude
+      - path: /usr/bin/curl
+      - path: /usr/bin/node
+      - path: /usr/local/bin/node
+  web_fetch:
+    name: Web Fetch common sites
+    endpoints:
+      - host: github.com
+        port: 443
+      - host: "*.github.com"
+        port: 443
+      - host: "*.githubusercontent.com"
+        port: 443
+      - host: stackoverflow.com
+        port: 443
+      - host: "*.stackoverflow.com"
+        port: 443
+      - host: "*.stackexchange.com"
+        port: 443
+      - host: "*.wikipedia.org"
+        port: 443
+      - host: wikipedia.org
+        port: 443
+      - host: "*.npmjs.com"
+        port: 443
+      - host: npmjs.com
+        port: 443
+      - host: pypi.org
+        port: 443
+      - host: "*.pypi.org"
+        port: 443
+      - host: "*.readthedocs.io"
+        port: 443
+      - host: "*.docs.rs"
+        port: 443
+    binaries:
+      - path: /usr/local/bin/claude
+      - path: /usr/bin/node
+      - path: /usr/local/bin/node
+      - path: /usr/bin/curl

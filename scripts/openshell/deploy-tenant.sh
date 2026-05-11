@@ -39,8 +39,14 @@ log_success() { echo -e "${GREEN}✓${NC} $1"; }
 log_warn()    { echo -e "${YELLOW}⚠${NC} $1"; }
 log_error()   { echo -e "${RED}✗${NC} $1"; }
 
+VERBOSE="${VERBOSE:-false}"
+
 run_cmd() {
-  if $DRY_RUN; then echo "  [dry-run] $*"; else "$@"; fi
+  if $DRY_RUN; then echo "  [dry-run] $*"; else echo "  + $*" >&2; "$@"; fi
+}
+
+log_verbose() {
+  if $VERBOSE; then echo -e "  ${BLUE}[verbose]${NC} $1"; fi
 }
 
 usage() {
@@ -54,6 +60,7 @@ Arguments:
 
 Options:
   --help               Show this help message
+  --verbose, -v        Verbose output (helm --debug, pod status, events)
   --dry-run            Print helm commands without executing
   --chart-dir <path>   Helm chart directory (default: $CHART_DIR)
   --keycloak-ns <ns>   Keycloak namespace (default: keycloak)
@@ -72,6 +79,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --help)          usage ;;
     --dry-run)       DRY_RUN=true; shift ;;
+    --verbose|-v)    VERBOSE=true; shift ;;
     --chart-dir)     CHART_DIR="$2"; shift 2 ;;
     --keycloak-ns)   KEYCLOAK_NS="$2"; shift 2 ;;
     --image-tag)     IMAGE_TAG="$2"; shift 2 ;;
@@ -237,14 +245,34 @@ HELM_ARGS=(
   --timeout "${TIMEOUT}s"
 )
 
+if $VERBOSE; then
+  HELM_ARGS+=(--debug)
+fi
+
 for extra in "${EXTRA_HELM_SETS[@]}"; do
   HELM_ARGS+=(--set "$extra")
 done
 
+log_verbose "Helm values: tenant=$TENANT oidc.issuer=$OIDC_ISSUER oidc.audience=$TENANT ingress.type=$INGRESS_TYPE ingress.host=$INGRESS_HOST"
+log_verbose "Extra sets: ${EXTRA_HELM_SETS[*]:-none}"
+log_verbose "Full command: helm ${HELM_ARGS[*]}"
+
 if $DRY_RUN; then
   echo "  [dry-run] helm ${HELM_ARGS[*]}"
 else
-  helm "${HELM_ARGS[@]}"
+  log_info "Running helm upgrade (timeout: ${TIMEOUT}s)..."
+  if ! helm "${HELM_ARGS[@]}"; then
+    log_error "Helm upgrade FAILED"
+    log_error "Checking release status..."
+    helm status "$RELEASE_NAME" -n "$TENANT" 2>&1 | head -20
+    helm history "$RELEASE_NAME" -n "$TENANT" 2>&1 | tail -10
+    log_error "Checking pod status in namespace $TENANT..."
+    kubectl get pods -n "$TENANT" -o wide 2>&1
+    log_error "Checking events in namespace $TENANT..."
+    kubectl get events -n "$TENANT" --sort-by='.lastTimestamp' 2>&1 | tail -20
+    exit 1
+  fi
+  log_success "Helm release $RELEASE_NAME deployed"
 fi
 echo ""
 
@@ -254,6 +282,8 @@ log_info "Step 3: Waiting for cert-manager certificates"
 if $DRY_RUN; then
   echo "  [dry-run] kubectl wait --for=condition=Ready certificate -n $TENANT --all --timeout=${TIMEOUT}s"
 else
+  log_verbose "Listing certificates in namespace $TENANT..."
+  if $VERBOSE; then kubectl get certificate -n "$TENANT" -o wide 2>&1 || true; fi
   if kubectl get certificate -n "$TENANT" --no-headers 2>/dev/null | grep -q .; then
     kubectl wait --for=condition=Ready certificate --all \
       -n "$TENANT" --timeout="${TIMEOUT}s"
@@ -270,9 +300,28 @@ log_info "Step 4: Waiting for gateway pod rollout"
 if $DRY_RUN; then
   echo "  [dry-run] kubectl rollout status statefulset/openshell-server -n $TENANT --timeout=${TIMEOUT}s"
 else
+  log_verbose "Checking pod status before rollout wait..."
+  if $VERBOSE; then
+    kubectl get pods -n "$TENANT" -o wide 2>&1
+    kubectl get statefulset openshell-server -n "$TENANT" -o wide 2>&1 || true
+  fi
   kubectl rollout status statefulset/openshell-server \
-    -n "$TENANT" --timeout="${TIMEOUT}s"
+    -n "$TENANT" --timeout="${TIMEOUT}s" || {
+    log_error "Gateway rollout FAILED — diagnosing..."
+    kubectl get pods -n "$TENANT" -o wide 2>&1
+    kubectl describe statefulset openshell-server -n "$TENANT" 2>&1 | tail -30
+    kubectl get events -n "$TENANT" --sort-by='.lastTimestamp' 2>&1 | tail -20
+    # Show logs from any failing pod
+    for pod in $(kubectl get pods -n "$TENANT" -l app=openshell-server --no-headers -o name 2>/dev/null); do
+      log_error "Logs from $pod:"
+      kubectl logs "$pod" -n "$TENANT" --all-containers --tail=30 2>&1 || true
+    done
+    exit 1
+  }
   log_success "Gateway pod ready"
+  if $VERBOSE; then
+    kubectl get pods -n "$TENANT" -o wide 2>&1
+  fi
 fi
 echo ""
 

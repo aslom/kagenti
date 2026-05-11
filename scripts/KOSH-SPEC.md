@@ -62,6 +62,14 @@ sandbox, gateway, status, forward, logs, policy, settings,
 provider, inference, doctor, term, ssh-proxy
 ```
 
+### OpenShell Binary Resolution
+
+`_find_openshell()` searches in order:
+1. `<workspace>/.local/bin/openshell` (workspace-local install, preferred for version consistency)
+2. `shutil.which("openshell")` (PATH lookup)
+
+This avoids version mismatches when the uv-cached openshell differs from the gateway version.
+
 ### Native Commands
 
 #### `kosh completions`
@@ -91,12 +99,16 @@ Set up and sync a project into a remote OpenShell sandbox.
 | `--connect / --no-connect` | `--no-connect` | SSH into sandbox after setup |
 | `--custom-image` | off | Build from Dockerfile.sandbox |
 | `--model` | `aws/claude-opus-4-6` | Claude model for ANTHROPIC_MODEL |
+| `--allow-profile` | (none) | Domain profile to apply after teleport (repeatable) |
+| `--reapply-allowlist / --no-reapply-allowlist` | `--reapply-allowlist` | Reapply saved allowlists from config |
 
 **Behavior**:
 1. Resolves project directory (explicit or last local sandbox from config)
 2. Sets environment variables (`OPENSHELL_BIN`, `XDG_CONFIG_HOME`, `KOSH_CUSTOM_IMAGE`, `KOSH_MODEL`)
 3. Delegates to `teleport.sh` with `cwd` set to project directory
-4. Optionally connects via `openshell sandbox connect <name>`
+4. Applies any `--allow-profile` profiles via `openshell policy update` and saves them to metadata
+5. If `--reapply-allowlist` (default), reapplies all previously saved profiles and domains from config
+6. Optionally connects via `openshell sandbox connect <name>`
 
 #### `kosh local-sandbox create`
 
@@ -143,14 +155,162 @@ Delete a sandbox directory and metadata entry.
 
 **Behavior**: Prompts for confirmation, removes directory (`shutil.rmtree`), removes from `metadata.json`, clears `last_local_sandbox` if it pointed to the deleted sandbox.
 
+#### `kosh allow`
+
+Manage domain allowlists for OpenShell sandboxes. OpenShell sandboxes are default-deny for network access. This command group provides a simple interface for allowing domains, with per-sandbox persistence and reusable profiles.
+
+##### `kosh allow add`
+
+Allow domains on a running sandbox.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `DOMAINS` | (positional, optional) | Domains to allow (space or comma-separated) |
+| `--sandbox, -s` | last used | Sandbox name |
+| `--port, -p` | 443 | Port to allow |
+| `--binary, -b` | claude + node + curl | Binary paths (repeatable) |
+| `--no-wait` | off | Don't wait for policy reload |
+| `--no-save` | off | Don't persist domains to config |
+| `--from-file, -f` | (none) | Read domains from file (one per line, `#` comments, commas supported) |
+| `--from-json, -j` | (none) | Read from JSON (output of `allow denied --json`). Use `-` for stdin |
+
+**Input formats** — all combinable in a single invocation:
+- Space-separated: `kosh allow add github.com stackoverflow.com`
+- Comma-separated: `kosh allow add github.com,stackoverflow.com,pypi.org`
+- From file: `kosh allow add --from-file domains.txt`
+- From JSON: `kosh allow add --from-json denied.json`
+- Piped: `kosh allow denied --json | kosh allow add --from-json -`
+
+**Behavior**: Calls `openshell policy update <sandbox> --add-endpoint <host>:<port>` for each domain. Saves to `metadata.json` unless `--no-save`.
+
+##### `kosh allow denied`
+
+Show domains denied by the sandbox proxy. Reads OCSF logs for `DENIED` network events.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--sandbox, -s` | last used | Sandbox name |
+| `--since` | `1h` | How far back to look (e.g. `5m`, `1h`, `24h`) |
+| `--apply` | off | Immediately allow all denied domains |
+| `--json` | off | Output as JSON list (round-trips to `allow add --from-json`) |
+
+**JSON output format**:
+```json
+[{"host": "httpbin.org", "port": 443, "count": 3}]
+```
+
+**Workflow — discover and allow denied domains**:
+```bash
+# See what was blocked
+kosh allow denied --sandbox test
+
+# Auto-allow everything that was blocked
+kosh allow denied --apply --sandbox test
+
+# Or pipe to allow add for review/filtering
+kosh allow denied --json | kosh allow add --from-json - --sandbox test
+```
+
+##### `kosh allow list`
+
+Show allowed domains and applied profiles for a sandbox.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--sandbox, -s` | last used | Sandbox name |
+
+##### `kosh allow remove`
+
+Remove domains from saved config. Does NOT revoke from the running sandbox (OpenShell policy is additive-only).
+
+| Argument | Description |
+|----------|-------------|
+| `DOMAINS` | Domains to remove (required) |
+| `--sandbox, -s` | Sandbox name (defaults to last used) |
+
+##### `kosh allow reapply`
+
+Reapply all saved profiles and domains to a sandbox. Useful after recreating a sandbox.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--sandbox, -s` | last used | Sandbox name |
+
+##### `kosh allow profile list`
+
+List all available profiles (built-in + user-defined). Shows name, type, domain count, and description.
+
+##### `kosh allow profile show <name>`
+
+Show all endpoints in a profile.
+
+##### `kosh allow profile apply <name>`
+
+Apply a profile's domains to a running sandbox. Saves the profile name to metadata for reapply.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--sandbox, -s` | last used | Sandbox name |
+
+##### `kosh allow profile create <name>`
+
+Create a user-defined profile.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--domain, -d` | (required, repeatable) | Domain (`host` or `host:port`) |
+| `--description` | (none) | Profile description |
+
+##### `kosh allow profile delete <name>`
+
+Delete a user-defined profile. Built-in profiles cannot be deleted.
+
+#### Built-in Profiles
+
+Derived from `litellm_sandbox_policy.yaml` network policy blocks:
+
+| Profile | Domains | Description |
+|---------|---------|-------------|
+| `claude-infra` | api.anthropic.com, statsig.anthropic.com, sentry.io, platform.claude.com | Claude Code infrastructure |
+| `web-search` | google.com, *.google.com, *.googleapis.com, bing.com, *.bing.com, duckduckgo.com, *.duckduckgo.com | Search engines |
+| `dev-tools` | github.com, *.github.com, *.githubusercontent.com, stackoverflow.com, *.stackoverflow.com, *.stackexchange.com, npmjs.com, *.npmjs.com, pypi.org, *.pypi.org, *.readthedocs.io, *.docs.rs | Developer resources |
+| `ibm-litellm` | ete-litellm.ai-models.vpc-int.res.ibm.com | IBM LiteLLM proxy |
+
 ### Configuration
 
 Stored at `$XDG_CONFIG_HOME/kosh/` (defaults to `~/.config/kosh/`):
 
 | File | Format | Purpose |
 |------|--------|---------|
-| `metadata.json` | `{"sandboxes": {"name": {"directory": "/abs/path"}}}` | Registry of all local sandboxes |
+| `metadata.json` | JSON (see below) | Registry of sandboxes, allowlists, and applied profiles |
 | `last_local_sandbox` | Plain text (one absolute path) | Most recently used sandbox |
+| `profiles.json` | JSON (see below) | User-defined domain profiles |
+
+**metadata.json** — extended with per-sandbox allowlist state:
+```json
+{
+  "sandboxes": {
+    "test": {
+      "directory": "/Users/user/projects/test",
+      "allowed_domains": [{"host": "custom-api.com", "port": 443}],
+      "applied_profiles": ["dev-tools", "web-search"]
+    }
+  }
+}
+```
+
+**profiles.json** — user-defined profiles:
+```json
+{
+  "version": 1,
+  "profiles": {
+    "my-apis": {
+      "description": "Internal services",
+      "endpoints": [{"host": "api.corp.com", "port": 443}]
+    }
+  }
+}
+```
 
 ---
 
@@ -282,25 +442,17 @@ OpenShell sandbox policy for remote sandboxes. Defines filesystem and network ac
 ```yaml
 version: 1
 filesystem_policy:
-  read_write:
-    - /sandbox
-    - /tmp
-    - /Users
+  read_write: [/sandbox, /tmp, /Users]
 network_policies:
-  ibm_litellm:
-    name: IBM LiteLLM
-    endpoints:
-      - host: ete-litellm.ai-models.vpc-int.res.ibm.com
-        port: 443
-        access: full
-    binaries:
-      - path: /usr/local/bin/claude
-      - path: /usr/bin/curl
-      - path: /usr/bin/node
-      - path: /usr/local/bin/node
+  ibm_litellm:     # IBM LiteLLM proxy
+  claude_code:     # Anthropic API, statsig, sentry, platform.claude.com
+  web_search:      # Google, Bing, DuckDuckGo (bare + wildcard subdomains)
+  web_fetch:       # GitHub, Stack Overflow, Wikipedia, npm, PyPI, ReadTheDocs, docs.rs
 ```
 
-Only allows network egress to the IBM LiteLLM proxy on port 443, restricted to specific binaries.
+Each policy block specifies `endpoints` (host + port) and `binaries` (allowed executables). All blocks include `/usr/local/bin/claude`, `/usr/bin/curl`, `/usr/bin/node`, and `/usr/local/bin/node`.
+
+**Wildcard notes**: Subdomain wildcards (`*.google.com`) work but TLD wildcards (`*.com`) are rejected. Bare domains (`google.com`) must be listed alongside wildcards (`*.google.com`) to match both.
 
 ---
 
