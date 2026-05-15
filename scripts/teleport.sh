@@ -95,6 +95,10 @@ fi
 echo "Uploading files from $DIR to sandbox:$DIR ..."
 run_cmd "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" -- mkdir -p "$DIR"
 run_cmd "$OPENSHELL" sandbox upload "$SANDBOX_NAME" "$DIR" "$DIR"
+if [[ -d "$DIR/.claude/skills" ]]; then
+  echo "  Uploading .claude/skills (untracked files)..."
+  run_cmd "$OPENSHELL" sandbox upload --no-git-ignore "$SANDBOX_NAME" "$DIR/.claude/skills" "$DIR/.claude/"
+fi
 echo "  Files uploaded."
 
 # ---------------------------------------------------------------------------

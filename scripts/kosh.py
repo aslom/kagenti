@@ -255,8 +255,7 @@ def teleport(directory: str | None, openshell_bin: str | None, xdg_config_home: 
     sandbox_name = cwd_path.name
 
     env = os.environ.copy()
-    if openshell_bin:
-        env["OPENSHELL_BIN"] = openshell_bin
+    env["OPENSHELL_BIN"] = openshell_bin or _find_openshell()
     if xdg_config_home:
         env["XDG_CONFIG_HOME"] = xdg_config_home
     if custom_image:
