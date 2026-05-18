@@ -3,12 +3,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-POLICY_FILE="$SCRIPT_DIR/litellm_sandbox_policy.yaml"
+POLICY_FILE="$SCRIPT_DIR/bob_sandbox_policy.yaml"
 DOCKERFILE="$SCRIPT_DIR/Dockerfile.sandbox"
 
 export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$WORKSPACE_ROOT/.config}"
 
-MODEL="${KOSH_MODEL:-aws/claude-opus-4-6}"
+MODEL="${KOSH_MODEL:-claude-opus-4-6}"
 
 run_cmd() {
   echo "+ $*" >&2
@@ -84,20 +84,44 @@ else
     echo "  Using custom Dockerfile: $DOCKERFILE"
     CREATE_ARGS+=(--from "$DOCKERFILE")
   fi
-  run_cmd "$OPENSHELL" sandbox create "${CREATE_ARGS[@]}" -- true
+  run_cmd "$OPENSHELL" sandbox create "${CREATE_ARGS[@]}" --no-tty -- true || true
   echo "  Sandbox '$SANDBOX_NAME' created."
 fi
+
+# Wait for sandbox to reach Ready state
+echo "Waiting for sandbox '$SANDBOX_NAME' to be ready..."
+for i in $(seq 1 60); do
+  PHASE=$("$OPENSHELL" sandbox list 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | grep -w "$SANDBOX_NAME" | awk '{print $NF}')
+  if [[ "$PHASE" == "Ready" ]]; then
+    # Confirm exec actually works (list can report Ready before exec is available)
+    if "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" --no-tty -- true 2>/dev/null; then
+      echo "  Sandbox '$SANDBOX_NAME' is ready."
+      break
+    fi
+  fi
+  if [[ $i -eq 60 ]]; then
+    echo "error: sandbox '$SANDBOX_NAME' did not become ready within 60s (phase: $PHASE)" >&2
+    exit 1
+  fi
+  echo "  Waiting... (phase: $PHASE)"
+  sleep 1
+done
 
 # ---------------------------------------------------------------------------
 # Step 4: Upload local files into the sandbox
 # ---------------------------------------------------------------------------
 
+# Remove dangling symlinks that would cause upload to fail with EPERM
+# (common when project was copied from a local macOS sandbox with symlinks
+# pointing outside the workspace, e.g. uv cache links)
+find "$DIR" -type l ! -exec test -e {} \; -delete 2>/dev/null || true
+
 echo "Uploading files from $DIR to sandbox:$DIR ..."
 run_cmd "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" -- mkdir -p "$DIR"
 run_cmd "$OPENSHELL" sandbox upload "$SANDBOX_NAME" "$DIR" "$DIR"
-if [[ -d "$DIR/.claude/skills" ]]; then
-  echo "  Uploading .claude/skills (untracked files)..."
-  run_cmd "$OPENSHELL" sandbox upload --no-git-ignore "$SANDBOX_NAME" "$DIR/.claude/skills" "$DIR/.claude/"
+if [[ -d "$DIR/.claude" ]]; then
+  echo "  Uploading .claude/ (gitignored, using --no-git-ignore)..."
+  run_cmd "$OPENSHELL" sandbox upload --no-git-ignore "$SANDBOX_NAME" "$DIR/.claude" "$DIR/"
 fi
 echo "  Files uploaded."
 
@@ -131,6 +155,13 @@ if ! run_cmd "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" -- grep -q "CLAUDE
     sh -c "printf 'export CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1\n' >> $BASHRC"
 fi
 
+# Suppress Node.js proxy and deprecation warnings from OpenShell's HTTP proxy interception
+if ! run_cmd "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" -- grep -q "NODE_NO_WARNINGS" "$BASHRC" 2>/dev/null; then
+  echo "  Adding NODE_NO_WARNINGS..."
+  run_cmd "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" -- \
+    sh -c "printf 'export NODE_NO_WARNINGS=1\n' >> $BASHRC"
+fi
+
 # Append ANTHROPIC_MODEL if missing
 if ! run_cmd "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" -- grep -q "ANTHROPIC_MODEL" "$BASHRC" 2>/dev/null; then
   echo "  Adding ANTHROPIC_MODEL=$MODEL..."
@@ -152,8 +183,71 @@ if ! run_cmd "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" -- grep -q 'cd \$H
     sh -c "printf 'cd \$HOME\n' >> $BASHRC"
 fi
 
+# Append BOBSHELL_API_KEY if missing (required for Bob shell)
+if [[ -n "${BOBSHELL_API_KEY:-}" ]]; then
+  if ! run_cmd "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" -- grep -q "BOBSHELL_API_KEY" "$BASHRC" 2>/dev/null; then
+    echo "  Adding BOBSHELL_API_KEY..."
+    run_cmd "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" -- \
+      sh -c "printf 'export BOBSHELL_API_KEY=\"$BOBSHELL_API_KEY\"\n' >> $BASHRC"
+  fi
+else
+  echo "  WARNING: BOBSHELL_API_KEY not set in local environment; Bob may not authenticate." >&2
+fi
+
 echo "Verifying .bashrc..."
 run_cmd "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" -- cat "$BASHRC"
+
+# ---------------------------------------------------------------------------
+# Step 6: Install Bob shell
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "Installing Bob shell..."
+
+exec_sb() {
+  "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" --no-tty -- bash -c "$1"
+}
+
+if exec_sb 'export PATH="/sandbox/.npm-global/bin:$PATH" && command -v bob >/dev/null 2>&1' 2>/dev/null; then
+  BOB_VERSION=$(exec_sb 'export PATH="/sandbox/.npm-global/bin:$PATH" && bob --version 2>/dev/null | tail -1 | tr -d "[:space:]"' 2>/dev/null || echo "unknown")
+  echo "  Bob already installed (version: $BOB_VERSION)."
+else
+  echo "  Setting up npm global prefix..."
+  exec_sb 'mkdir -p /sandbox/.npm-global && npm config set prefix /sandbox/.npm-global' 2>/dev/null
+
+  # Ensure .npm-global/bin is on PATH in .bashrc
+  if ! exec_sb 'grep -q ".npm-global/bin" /sandbox/.bashrc' 2>/dev/null; then
+    exec_sb 'echo "export PATH=\"/sandbox/.npm-global/bin:\$PATH\"" >> /sandbox/.bashrc'
+  fi
+
+  echo "  Downloading Bob tarball..."
+  if exec_sb 'curl -sfL https://s3.us-south.cloud-object-storage.appdomain.cloud/bobshell/bobshell-latest.tgz -o /tmp/bobshell.tgz && tar tzf /tmp/bobshell.tgz >/dev/null 2>&1' 2>/dev/null; then
+    echo "  Extracting..."
+    exec_sb 'mkdir -p /sandbox/.npm-global/lib/node_modules/bobshell && tar xzf /tmp/bobshell.tgz -C /sandbox/.npm-global/lib/node_modules/bobshell --strip-components=1'
+    exec_sb 'mkdir -p /sandbox/.npm-global/bin && ln -sf ../lib/node_modules/bobshell/bundle/bob.js /sandbox/.npm-global/bin/bob && chmod +x /sandbox/.npm-global/lib/node_modules/bobshell/bundle/bob.js'
+    exec_sb 'rm -f /tmp/bobshell.tgz'
+  else
+    echo "  Direct download failed (403 or network issue). Trying local bundle..."
+    # Fall back: bundle from local workspace if setup-bob-sandbox was run before
+    BOB_LOCAL="$WORKSPACE_ROOT/.cache/bobshell-latest.tgz"
+    if [[ -f "$BOB_LOCAL" ]]; then
+      run_cmd "$OPENSHELL" sandbox upload "$SANDBOX_NAME" "$BOB_LOCAL" /sandbox/
+      exec_sb 'mkdir -p /sandbox/.npm-global/lib/node_modules/bobshell && tar xzf /sandbox/bobshell-latest.tgz -C /sandbox/.npm-global/lib/node_modules/bobshell --strip-components=1'
+      exec_sb 'mkdir -p /sandbox/.npm-global/bin && ln -sf ../lib/node_modules/bobshell/bundle/bob.js /sandbox/.npm-global/bin/bob && chmod +x /sandbox/.npm-global/lib/node_modules/bobshell/bundle/bob.js'
+      exec_sb 'rm -f /sandbox/bobshell-latest.tgz'
+    else
+      echo "  WARNING: Could not install Bob. Download the tarball manually to $BOB_LOCAL" >&2
+    fi
+  fi
+
+  # Verify
+  if exec_sb 'export PATH="/sandbox/.npm-global/bin:$PATH" && command -v bob >/dev/null 2>&1' 2>/dev/null; then
+    BOB_VERSION=$(exec_sb 'export PATH="/sandbox/.npm-global/bin:$PATH" && bob --version 2>/dev/null | tail -1 | tr -d "[:space:]"' 2>/dev/null || echo "unknown")
+    echo "  Bob installed successfully (version: $BOB_VERSION)."
+  else
+    echo "  WARNING: Bob installation may have failed." >&2
+  fi
+fi
 
 echo ""
 echo "Done. Connect with:"
