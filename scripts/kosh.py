@@ -118,7 +118,7 @@ def cli() -> None:
 
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
 TELEPORT_SH = SCRIPT_DIR / "teleport.sh"
-DEFAULT_MODEL = "aws/claude-opus-4-6"
+DEFAULT_MODEL = "claude-opus-4-6"
 WORKSPACE_ROOT = SCRIPT_DIR.parent.parent
 
 DEFAULT_BINARIES = [
