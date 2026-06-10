@@ -1,0 +1,839 @@
+#!/usr/bin/env python3
+"""kagenti-teleport-setup — Install kosh CLI, configure gateway, and login.
+
+Sets up kosh.py and all supporting files so that:
+    alias kosh="uv run $INSTALL_DIR/kosh.py"
+works out of the box. Configures the gateway TLS certificates and performs
+headless OIDC login (no browser required).
+
+Usage:
+    python3 kagenti-teleport-setup.py
+    python3 kagenti-teleport-setup.py --user alice --password alice123 --test
+    KOSH_USER=alice KOSH_PASSWORD=alice123 python3 kagenti-teleport-setup.py --test
+"""
+from __future__ import annotations
+
+import argparse
+import base64
+import json
+import os
+import pathlib
+import shutil
+import socket
+import ssl
+import subprocess
+import sys
+import urllib.request
+import urllib.parse
+import urllib.error
+from urllib.parse import urlparse
+
+SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
+KAGENTI_SCRIPTS_DIR = SCRIPT_DIR
+
+DEFAULT_GATEWAY_URL = os.environ.get(
+    "KOSH_GATEWAY_URL",
+    "https://openshell-team1.apps.epoc002.ete14.res.ibm.com",
+)
+
+DEFAULT_SERVER_URL = os.environ.get(
+    "KAGENTI_SETUP_SERVER_URL",
+    "https://kagenti-teleport-setup-team1.apps.epoc002.ete14.res.ibm.com",
+)
+
+# ---------------------------------------------------------------------------
+# Embedded mTLS certificates for the default gateway.
+# These are issued by the openshell-ca (cert-manager) and expire in year 4096.
+# Embedding them makes the setup script self-contained (no kubectl needed).
+# ---------------------------------------------------------------------------
+
+EMBEDDED_CA_CERT = """\
+-----BEGIN CERTIFICATE-----
+MIIBjDCCATKgAwIBAgIUdnWp1TFUAQG2q5T2O78L4XpUuxcwCgYIKoZIzj0EAwIw
+KzEVMBMGA1UEAwwMb3BlbnNoZWxsLWNhMRIwEAYDVQQKDAlvcGVuc2hlbGwwIBcN
+NzUwMTAxMDAwMDAwWhgPNDA5NjAxMDEwMDAwMDBaMCsxFTATBgNVBAMMDG9wZW5z
+aGVsbC1jYTESMBAGA1UECgwJb3BlbnNoZWxsMFkwEwYHKoZIzj0CAQYIKoZIzj0D
+AQcDQgAEqtBbJ9z3zwFJ//1MCc1Ut+cPo7xxYxWxa2k3VFzmABu4OrMmyMx0nsSk
+FJNwk1ppeR7riYmX7kBwKTnwKlYSpaMyMDAwHQYDVR0OBBYEFJvu52wTTrYfBfmG
+McvNIrOVJrXhMA8GA1UdEwEB/wQFMAMBAf8wCgYIKoZIzj0EAwIDSAAwRQIgWVaC
+Xmt8/nYm6OcFjB4Qz/iS8/pwn5zNMlGoxlbS/qoCIQCBNAIXZAfda9HCcRXYU7uy
+OMqyYShL3V0rtIrPF+++GA==
+-----END CERTIFICATE-----
+"""
+
+EMBEDDED_CLIENT_CERT = """\
+-----BEGIN CERTIFICATE-----
+MIIBYDCCAQegAwIBAgIUIPg47SwA7u5Q9N9D8AFMZsxHwEQwCgYIKoZIzj0EAwIw
+KzEVMBMGA1UEAwwMb3BlbnNoZWxsLWNhMRIwEAYDVQQKDAlvcGVuc2hlbGwwIBcN
+NzUwMTAxMDAwMDAwWhgPNDA5NjAxMDEwMDAwMDBaMDQxGTAXBgNVBAMMEG9wZW5z
+aGVsbC1jbGllbnQxFzAVBgNVBAsMDm9wZW5zaGVsbC11c2VyMFkwEwYHKoZIzj0C
+AQYIKoZIzj0DAQcDQgAEYnztuQtNL2RKb2oGOrABpkqKWaMOECvOOL0Dov8cCBM+
+ZfBHx2k85tbH4tRQtt9csKv5nW12am7yxDXf1qCiLjAKBggqhkjOPQQDAgNHADBE
+AiBAKw4rYgxPswIzgVQDdDJQjpHxq12oKTDLl/ZYzjyHaAIgeMtwdtBwTc0Uic8L
+m3+gKSCAD/1qNbsr8pNzIeu5sTE=
+-----END CERTIFICATE-----
+"""
+
+EMBEDDED_CLIENT_KEY = """\
+-----BEGIN PRIVATE KEY-----
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg9/Wv/zQ/eCZJRsrC
+liaxKVYHyP9k1SMk70YdKoBGjTShRANCAARifO25C00vZEpvagY6sAGmSopZow4Q
+K844vQOi/xwIEz5l8EfHaTzm1sfi1FC231ywq/mdbXZqbvLENd/WoKIu
+-----END PRIVATE KEY-----
+"""
+
+KOSH_FILES = [
+    "kosh.py",
+    "teleport.sh",
+    "sandbox.sh",
+    "Dockerfile.sandbox",
+    "agent-sandbox.sb",
+    "litellm_sandbox_policy.yaml",
+]
+
+
+def check_uv() -> str | None:
+    """Check if uv is available. Returns path or None."""
+    uv = shutil.which("uv")
+    if uv:
+        return uv
+    common_paths = [
+        pathlib.Path.home() / ".local" / "bin" / "uv",
+        pathlib.Path.home() / ".cargo" / "bin" / "uv",
+        pathlib.Path("/opt/homebrew/bin/uv"),
+        pathlib.Path("/usr/local/bin/uv"),
+    ]
+    for p in common_paths:
+        if p.is_file() and os.access(p, os.X_OK):
+            return str(p)
+    return None
+
+
+def get_install_dir(custom: str | None = None) -> pathlib.Path:
+    """Determine install directory from XDG_CONFIG_HOME or custom path."""
+    if custom:
+        return pathlib.Path(custom).resolve()
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    if xdg:
+        return pathlib.Path(xdg).resolve()
+    return (pathlib.Path.home() / ".config" / "kosh").resolve()
+
+
+def get_openshell_config_dir() -> pathlib.Path:
+    """Return the openshell config directory (respects XDG_CONFIG_HOME)."""
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    if xdg:
+        return pathlib.Path(xdg) / "openshell"
+    return pathlib.Path.home() / ".config" / "openshell"
+
+
+def download_source_files(dest_dir: pathlib.Path, server_url: str) -> bool:
+    """Download kosh support files from the remote server."""
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
+    downloaded = 0
+    for filename in KOSH_FILES:
+        url = f"{server_url}/{filename}"
+        dst = dest_dir / filename
+        try:
+            req = urllib.request.Request(url)
+            with urllib.request.urlopen(req, context=ctx, timeout=15) as resp:
+                dst.write_bytes(resp.read())
+            downloaded += 1
+        except (urllib.error.URLError, OSError):
+            if filename == "kosh.py":
+                print(f"  ERROR: Failed to download required file: {url}", file=sys.stderr)
+                return False
+
+    print(f"  Downloaded {downloaded} file(s) from {server_url}")
+    return True
+
+
+def install(install_dir: pathlib.Path, source_dir: pathlib.Path) -> bool:
+    """Copy kosh.py and supporting files to install_dir."""
+    install_dir.mkdir(parents=True, exist_ok=True)
+
+    copied = 0
+    for filename in KOSH_FILES:
+        src = source_dir / filename
+        dst = install_dir / filename
+        if src.exists():
+            shutil.copy2(src, dst)
+            if filename.endswith(".sh"):
+                dst.chmod(0o755)
+            copied += 1
+            print(f"  Installed: {dst}")
+        else:
+            if filename == "kosh.py":
+                print(f"  ERROR: required file not found: {src}", file=sys.stderr)
+                return False
+            print(f"  Skipped (not found): {src}")
+
+    kosh_py = install_dir / "kosh.py"
+    kosh_py.chmod(0o755)
+
+    print(f"\n  {copied} file(s) installed to {install_dir}")
+    return True
+
+
+def verify_install(uv_path: str, install_dir: pathlib.Path) -> bool:
+    """Verify kosh.py can be executed via uv run."""
+    kosh_py = install_dir / "kosh.py"
+    if not kosh_py.exists():
+        print(f"  ERROR: {kosh_py} not found", file=sys.stderr)
+        return False
+
+    print(f"\n  Verifying: {uv_path} run {kosh_py} --version")
+    result = subprocess.run(
+        [uv_path, "run", str(kosh_py), "--version"],
+        capture_output=True, text=True, timeout=120,
+    )
+    if result.returncode == 0:
+        print(f"  OK: {result.stdout.strip()}")
+        return True
+    else:
+        print(f"  WARN: exit code {result.returncode}", file=sys.stderr)
+        if result.stderr:
+            print(f"  stderr: {result.stderr.strip()}", file=sys.stderr)
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Gateway and certificate setup
+# ---------------------------------------------------------------------------
+
+def derive_oidc_issuer(gateway_url: str) -> str:
+    """Derive the OIDC issuer URL from the gateway URL."""
+    parsed = urlparse(gateway_url)
+    domain = parsed.hostname or ""
+    if "localtest.me" in domain:
+        return "http://keycloak.localtest.me:8080/realms/openshell"
+    elif ".apps." in domain:
+        apps_suffix = domain.split(".apps.", 1)[1]
+        return f"https://keycloak-keycloak.apps.{apps_suffix}/realms/openshell"
+    else:
+        return f"https://keycloak.{domain}/realms/openshell"
+
+
+def setup_gateway_config(gateway_url: str, gateway_name: str,
+                         oidc_issuer: str | None = None,
+                         oidc_client_id: str = "openshell-cli",
+                         oidc_audience: str | None = None) -> pathlib.Path:
+    """Create the gateway config directory with metadata.json (OIDC auth mode)."""
+    config_dir = get_openshell_config_dir()
+    gw_dir = config_dir / "gateways" / gateway_name
+
+    gw_dir.mkdir(parents=True, exist_ok=True)
+    (gw_dir / "mtls").mkdir(parents=True, exist_ok=True)
+
+    metadata = {
+        "name": gateway_name,
+        "gateway_endpoint": gateway_url,
+        "is_remote": True,
+        "gateway_port": 0,
+        "auth_mode": "oidc",
+    }
+    if oidc_issuer:
+        metadata["oidc_issuer"] = oidc_issuer
+    if oidc_client_id:
+        metadata["oidc_client_id"] = oidc_client_id
+    if oidc_audience:
+        metadata["oidc_audience"] = oidc_audience
+
+    (gw_dir / "metadata.json").write_text(json.dumps(metadata) + "\n")
+
+    # Set active gateway
+    (config_dir / "active_gateway").write_text(gateway_name)
+
+    print(f"  Gateway config: {gw_dir}")
+    print(f"  Active gateway set to: {gateway_name}")
+    return gw_dir
+
+
+def setup_certs_from_kubectl(gateway_name: str, tenant: str) -> bool:
+    """Extract CA and client certs from cluster via kubectl."""
+    kubectl = shutil.which("kubectl")
+    if not kubectl:
+        return False
+
+    result = subprocess.run(
+        [kubectl, "config", "current-context"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        return False
+
+    config_dir = get_openshell_config_dir()
+    mtls_dir = config_dir / "gateways" / gateway_name / "mtls"
+    mtls_dir.mkdir(parents=True, exist_ok=True)
+
+    # Extract ca.crt from openshell-server-tls
+    result = subprocess.run(
+        [kubectl, "get", "secret", "openshell-server-tls", "-n", tenant,
+         "-o", r"jsonpath={.data.ca\.crt}"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return False
+    (mtls_dir / "ca.crt").write_bytes(base64.b64decode(result.stdout.strip()))
+    (mtls_dir / "ca.crt").chmod(0o600)
+
+    # Extract tls.crt from openshell-client-tls
+    result = subprocess.run(
+        [kubectl, "get", "secret", "openshell-client-tls", "-n", tenant,
+         "-o", r"jsonpath={.data.tls\.crt}"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return False
+    (mtls_dir / "tls.crt").write_bytes(base64.b64decode(result.stdout.strip()))
+    (mtls_dir / "tls.crt").chmod(0o600)
+
+    # Extract tls.key from openshell-client-tls
+    result = subprocess.run(
+        [kubectl, "get", "secret", "openshell-client-tls", "-n", tenant,
+         "-o", r"jsonpath={.data.tls\.key}"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return False
+    (mtls_dir / "tls.key").write_bytes(base64.b64decode(result.stdout.strip()))
+    (mtls_dir / "tls.key").chmod(0o600)
+
+    print(f"  Extracted certificates from cluster to {mtls_dir}")
+    return True
+
+
+def setup_certs_embedded(gateway_name: str) -> bool:
+    """Install the embedded mTLS certificates into the gateway mtls directory."""
+    config_dir = get_openshell_config_dir()
+    mtls_dir = config_dir / "gateways" / gateway_name / "mtls"
+    mtls_dir.mkdir(parents=True, exist_ok=True)
+
+    (mtls_dir / "ca.crt").write_text(EMBEDDED_CA_CERT)
+    (mtls_dir / "ca.crt").chmod(0o600)
+    (mtls_dir / "tls.crt").write_text(EMBEDDED_CLIENT_CERT)
+    (mtls_dir / "tls.crt").chmod(0o600)
+    (mtls_dir / "tls.key").write_text(EMBEDDED_CLIENT_KEY)
+    (mtls_dir / "tls.key").chmod(0o600)
+
+    print(f"  Installed embedded certificates to {mtls_dir}")
+    return True
+
+
+def setup_certs_from_file(gateway_name: str, ca_cert: str | None,
+                          client_cert: str | None, client_key: str | None) -> bool:
+    """Copy provided certificate files into the gateway mtls directory."""
+    config_dir = get_openshell_config_dir()
+    mtls_dir = config_dir / "gateways" / gateway_name / "mtls"
+    mtls_dir.mkdir(parents=True, exist_ok=True)
+
+    ok = True
+    if ca_cert:
+        src = pathlib.Path(ca_cert).expanduser()
+        if src.exists():
+            shutil.copy2(src, mtls_dir / "ca.crt")
+            (mtls_dir / "ca.crt").chmod(0o600)
+            print(f"  Copied CA cert: {src}")
+        else:
+            print(f"  ERROR: CA cert file not found: {src}", file=sys.stderr)
+            ok = False
+
+    if client_cert:
+        src = pathlib.Path(client_cert).expanduser()
+        if src.exists():
+            shutil.copy2(src, mtls_dir / "tls.crt")
+            (mtls_dir / "tls.crt").chmod(0o600)
+            print(f"  Copied client cert: {src}")
+        else:
+            print(f"  ERROR: Client cert file not found: {src}", file=sys.stderr)
+            ok = False
+
+    if client_key:
+        src = pathlib.Path(client_key).expanduser()
+        if src.exists():
+            shutil.copy2(src, mtls_dir / "tls.key")
+            (mtls_dir / "tls.key").chmod(0o600)
+            print(f"  Copied client key: {src}")
+        else:
+            print(f"  ERROR: Client key file not found: {src}", file=sys.stderr)
+            ok = False
+
+    return ok
+
+
+# ---------------------------------------------------------------------------
+# OIDC Login via simulated PKCE flow
+# ---------------------------------------------------------------------------
+
+def oidc_login(oidc_issuer: str, username: str, password: str,
+               client_id: str = "openshell-cli", gateway_name: str | None = None) -> str | None:
+    """Perform OIDC login by simulating the PKCE browser flow.
+
+    Starts `openshell gateway login` (which opens a local callback server),
+    intercepts the auth URL, performs the Keycloak form login, and lets the
+    CLI receive the callback with the authorization code.
+
+    Falls back to ROPC grant if PKCE simulation fails.
+
+    Returns the access token on success, None on failure.
+    """
+    import re
+    import time
+    from http.cookiejar import CookieJar
+
+    print(f"\n  OIDC issuer: {oidc_issuer}")
+    print(f"  Username: {username}")
+
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
+    # Find openshell binary
+    uv_path = check_uv()
+    if not uv_path:
+        print("  ERROR: uv not found, cannot run openshell gateway login", file=sys.stderr)
+        return _oidc_login_ropc(oidc_issuer, username, password, client_id, gateway_name)
+
+    # Start openshell gateway login in background
+    print("  Starting openshell gateway login (PKCE flow)...")
+    proc = subprocess.Popen(
+        [uv_path, "run", "--with", "openshell==0.0.59", "--with", "click",
+         "openshell", "gateway", "login"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+
+    # Read output to get the auth URL with callback port
+    auth_url = None
+    callback_port = None
+    start = time.time()
+    while time.time() - start < 15:
+        line = proc.stdout.readline()
+        if not line:
+            break
+        line = line.strip()
+        match = re.search(r'(https://keycloak[^\s]+)', line)
+        if match:
+            auth_url = match.group(1)
+        port_match = re.search(r'redirect_uri=http%3A%2F%2F127\.0\.0\.1%3A(\d+)', line)
+        if not port_match and auth_url:
+            port_match = re.search(r'redirect_uri=http%3A%2F%2F127\.0\.0\.1%3A(\d+)', auth_url)
+        if port_match:
+            callback_port = port_match.group(1)
+            break
+
+    if not auth_url or not callback_port:
+        print("  PKCE flow: could not intercept auth URL, falling back to ROPC", file=sys.stderr)
+        proc.kill()
+        return _oidc_login_ropc(oidc_issuer, username, password, client_id, gateway_name)
+
+    print(f"  PKCE callback port: {callback_port}")
+
+    # Simulate browser: GET auth page, POST credentials, follow redirect to callback
+    opener = urllib.request.build_opener(
+        urllib.request.HTTPCookieProcessor(CookieJar()),
+        urllib.request.HTTPSHandler(context=ctx),
+    )
+
+    try:
+        resp = opener.open(auth_url, timeout=10)
+        html = resp.read().decode()
+
+        action_match = re.search(r'action="([^"]+)"', html)
+        if not action_match:
+            print("  ERROR: Could not find login form in Keycloak page", file=sys.stderr)
+            proc.kill()
+            return _oidc_login_ropc(oidc_issuer, username, password, client_id, gateway_name)
+
+        form_action = action_match.group(1).replace("&amp;", "&")
+
+        data = urllib.parse.urlencode({
+            "username": username,
+            "password": password,
+        }).encode()
+
+        req = urllib.request.Request(form_action, data=data, method="POST")
+        req.add_header("Content-Type", "application/x-www-form-urlencoded")
+
+        try:
+            resp = opener.open(req, timeout=10)
+        except urllib.error.URLError:
+            pass
+
+    except (urllib.error.URLError, OSError) as e:
+        print(f"  PKCE browser simulation failed: {e}", file=sys.stderr)
+        proc.kill()
+        return _oidc_login_ropc(oidc_issuer, username, password, client_id, gateway_name)
+
+    # Wait for openshell gateway login to complete
+    try:
+        stdout, _ = proc.communicate(timeout=10)
+        if stdout:
+            for line in stdout.strip().splitlines():
+                clean = line.strip()
+                if clean:
+                    print(f"  [login] {clean}")
+    except subprocess.TimeoutExpired:
+        proc.kill()
+
+    if proc.returncode == 0:
+        # Read the token that openshell stored
+        if gateway_name:
+            config_dir = get_openshell_config_dir()
+            token_file = config_dir / "gateways" / gateway_name / "token"
+            if token_file.exists():
+                access_token = token_file.read_text().strip()
+                print(f"  OK: PKCE login successful (token stored by CLI)")
+                return access_token
+        print("  OK: PKCE login successful")
+        return "pkce-login-complete"
+    else:
+        print(f"  PKCE login exited with code {proc.returncode}, falling back to ROPC")
+        return _oidc_login_ropc(oidc_issuer, username, password, client_id, gateway_name)
+
+
+def _oidc_login_ropc(oidc_issuer: str, username: str, password: str,
+                     client_id: str = "openshell-cli",
+                     gateway_name: str | None = None) -> str | None:
+    """Fallback: OIDC Resource Owner Password Credentials grant.
+
+    Stores token as plain file (openshell 0.0.59+ OIDC format).
+    """
+    token_endpoint = f"{oidc_issuer}/protocol/openid-connect/token"
+
+    print(f"  ROPC token endpoint: {token_endpoint}")
+
+    data = urllib.parse.urlencode({
+        "grant_type": "password",
+        "client_id": client_id,
+        "username": username,
+        "password": password,
+        "scope": "openid",
+    }).encode()
+
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
+    try:
+        req = urllib.request.Request(token_endpoint, data=data, method="POST")
+        req.add_header("Content-Type", "application/x-www-form-urlencoded")
+        with urllib.request.urlopen(req, context=ctx, timeout=15) as resp:
+            body = json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode(errors="replace")
+        print(f"  ERROR: OIDC login failed (HTTP {e.code})", file=sys.stderr)
+        try:
+            err = json.loads(error_body)
+            print(f"    {err.get('error', '')}: {err.get('error_description', error_body[:200])}", file=sys.stderr)
+        except json.JSONDecodeError:
+            print(f"    {error_body[:200]}", file=sys.stderr)
+        return None
+    except (urllib.error.URLError, OSError) as e:
+        print(f"  ERROR: Could not reach token endpoint: {e}", file=sys.stderr)
+        return None
+
+    access_token = body.get("access_token")
+    if not access_token:
+        print(f"  ERROR: No access_token in response: {body}", file=sys.stderr)
+        return None
+
+    # Store token in openshell 0.0.59+ OIDC format
+    if gateway_name:
+        import time as _time
+        config_dir = get_openshell_config_dir()
+        gw_dir = config_dir / "gateways" / gateway_name
+        gw_dir.mkdir(parents=True, exist_ok=True)
+
+        token_data = {
+            "access_token": access_token,
+            "refresh_token": body.get("refresh_token", ""),
+            "expires_at": int(_time.time()) + body.get("expires_in", 300),
+            "issuer": oidc_issuer,
+            "client_id": client_id,
+        }
+        (gw_dir / "oidc_token.json").write_text(json.dumps(token_data) + "\n")
+        (gw_dir / "oidc_token.json").chmod(0o600)
+
+        print(f"  Token stored: {gw_dir / 'oidc_token.json'}")
+
+    print(f"  OK: ROPC login successful (token expires in {body.get('expires_in', '?')}s)")
+    return access_token
+
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
+def run_test(uv_path: str, install_dir: pathlib.Path) -> None:
+    """Run kosh gateway login and sandbox list as integration tests."""
+    kosh_py = install_dir / "kosh.py"
+    kosh_cmd = [uv_path, "run", str(kosh_py)]
+
+    print("\n--- Test: kosh sandbox list ---")
+    result = subprocess.run(
+        kosh_cmd + ["sandbox", "list"],
+        timeout=30,
+    )
+    print(f"  Exit code: {result.returncode}")
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Install kosh CLI, configure gateway, and login to OpenShell",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=f"""\
+Environment variables:
+    KOSH_GATEWAY_URL   Gateway URL (default: {DEFAULT_GATEWAY_URL})
+    KOSH_USER          Username for OIDC login
+    KOSH_PASSWORD      Password for OIDC login
+
+Examples:
+    # Install + login with user/pass
+    python3 kagenti-teleport-setup.py --user alice --password alice123
+
+    # Use env variables
+    KOSH_USER=alice KOSH_PASSWORD=alice123 python3 kagenti-teleport-setup.py --test
+
+    # Custom gateway
+    KOSH_GATEWAY_URL=https://my-gw.example.com python3 kagenti-teleport-setup.py --user alice --password alice123
+
+    # Provide certs manually (from kubectl on another machine)
+    python3 kagenti-teleport-setup.py --ca-cert ca.crt --client-cert tls.crt --client-key tls.key
+
+    # Extract certs from cluster (requires KUBECONFIG)
+    python3 kagenti-teleport-setup.py --from-cluster --tenant team1
+""",
+    )
+    parser.add_argument(
+        "--install-dir",
+        default=None,
+        help="Custom install directory (default: $XDG_CONFIG_HOME or ~/.config/kosh)",
+    )
+    parser.add_argument(
+        "--source-dir",
+        default=None,
+        help="Source directory containing kosh.py and support files",
+    )
+    parser.add_argument(
+        "--tenant", "-t",
+        default="team1",
+        help="Tenant name / OIDC audience (default: team1)",
+    )
+    parser.add_argument(
+        "--gateway-name",
+        default=None,
+        help="Name for the gateway config (default: openshell-<tenant>)",
+    )
+    parser.add_argument(
+        "--gateway-url",
+        default=None,
+        help=f"Gateway endpoint URL (default: $KOSH_GATEWAY_URL or {DEFAULT_GATEWAY_URL})",
+    )
+    parser.add_argument(
+        "--user", "-u",
+        default=None,
+        help="Username for OIDC login (or set KOSH_USER env var)",
+    )
+    parser.add_argument(
+        "--password", "-p",
+        default=None,
+        help="Password for OIDC login (or set KOSH_PASSWORD env var)",
+    )
+    parser.add_argument(
+        "--ca-cert",
+        default=None,
+        help="Path to CA certificate file (for server verification)",
+    )
+    parser.add_argument(
+        "--client-cert",
+        default=None,
+        help="Path to client TLS certificate file (for mTLS)",
+    )
+    parser.add_argument(
+        "--client-key",
+        default=None,
+        help="Path to client TLS key file (for mTLS)",
+    )
+    parser.add_argument(
+        "--from-cluster",
+        action="store_true",
+        help="Extract certificates from cluster via kubectl",
+    )
+    parser.add_argument(
+        "--skip-install",
+        action="store_true",
+        help="Skip kosh file installation (certs + login only)",
+    )
+    parser.add_argument(
+        "--skip-certs",
+        action="store_true",
+        help="Skip certificate setup",
+    )
+    parser.add_argument(
+        "--skip-login",
+        action="store_true",
+        help="Skip OIDC login",
+    )
+    parser.add_argument(
+        "--test",
+        action="store_true",
+        help="After setup, run 'kosh sandbox list'",
+    )
+    parser.add_argument(
+        "--verify-only",
+        action="store_true",
+        help="Only verify existing installation",
+    )
+    args = parser.parse_args()
+
+    print("=== kagenti-teleport-setup ===\n")
+
+    # Derive defaults
+    tenant = args.tenant
+    gateway_name = args.gateway_name or f"openshell-{tenant}"
+    gateway_url = args.gateway_url or DEFAULT_GATEWAY_URL
+    oidc_issuer = derive_oidc_issuer(gateway_url)
+    username = args.user or os.environ.get("KOSH_USER")
+    password = args.password or os.environ.get("KOSH_PASSWORD")
+
+    print(f"  Gateway: {gateway_url}")
+    print(f"  Gateway name: {gateway_name}")
+    print(f"  Tenant: {tenant}")
+    print(f"  OIDC issuer: {oidc_issuer}")
+
+    # Step 1: Check uv
+    print("\nChecking for uv...")
+    uv_path = check_uv()
+    if not uv_path:
+        print(
+            "\nERROR: 'uv' is not installed or not found in PATH.\n\n"
+            "Please install uv first:\n"
+            "  curl -LsSf https://astral.sh/uv/install.sh | sh\n\n"
+            "Or via Homebrew:\n"
+            "  brew install uv\n\n"
+            "See https://docs.astral.sh/uv/getting-started/installation/",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    uv_version = subprocess.run(
+        [uv_path, "--version"], capture_output=True, text=True
+    ).stdout.strip()
+    print(f"  Found: {uv_path} ({uv_version})")
+
+    # Step 2: Determine install directory
+    install_dir = get_install_dir(args.install_dir)
+    print(f"\nInstall directory: {install_dir}")
+
+    if args.verify_only:
+        print("\n--- Verify-only mode ---")
+        if verify_install(uv_path, install_dir):
+            print("\nInstallation verified OK.")
+        else:
+            print("\nVerification failed.", file=sys.stderr)
+            sys.exit(1)
+        return
+
+    # Step 3: Install kosh files
+    if not args.skip_install:
+        source_dir = pathlib.Path(args.source_dir) if args.source_dir else KAGENTI_SCRIPTS_DIR
+        source_dir = source_dir.resolve()
+        print(f"Source directory: {source_dir}")
+
+        if not (source_dir / "kosh.py").exists():
+            # Running from remote URL or source files not available — download to CWD
+            server_url = os.environ.get("KAGENTI_SETUP_SERVER_URL", DEFAULT_SERVER_URL)
+            source_dir = pathlib.Path.cwd()
+            print(f"  kosh.py not found locally, downloading from {server_url} to {source_dir}...")
+            if not download_source_files(source_dir, server_url):
+                print("\nERROR: Could not download support files.", file=sys.stderr)
+                print("Use --source-dir to point to the directory containing kosh.py", file=sys.stderr)
+                sys.exit(1)
+
+        print("\nInstalling kosh files...")
+        if not install(install_dir, source_dir):
+            print("\nInstallation failed.", file=sys.stderr)
+            sys.exit(1)
+
+        print("\nVerifying installation...")
+        verify_install(uv_path, install_dir)
+
+    # Step 4: Set up gateway config
+    print("\n=== Gateway Setup ===")
+    setup_gateway_config(gateway_url, gateway_name,
+                         oidc_issuer=oidc_issuer,
+                         oidc_client_id="openshell-cli",
+                         oidc_audience=tenant)
+
+    # Step 5: Certificate setup
+    if not args.skip_certs:
+        print("\n=== Certificate Setup ===")
+
+        certs_ok = False
+
+        # Option A: From provided files
+        if args.ca_cert or args.client_cert or args.client_key:
+            print("  Installing certificates from provided files...")
+            certs_ok = setup_certs_from_file(
+                gateway_name, args.ca_cert, args.client_cert, args.client_key,
+            )
+
+        # Option B: From cluster
+        elif args.from_cluster:
+            print("  Extracting certificates from cluster...")
+            certs_ok = setup_certs_from_kubectl(gateway_name, tenant)
+            if not certs_ok:
+                print("  Failed to extract from cluster. Falling back to embedded certs.")
+                certs_ok = setup_certs_embedded(gateway_name)
+
+        # Option C: Use embedded certs (default — no kubectl needed)
+        else:
+            print("  Using embedded certificates (expire year 4096)...")
+            certs_ok = setup_certs_embedded(gateway_name)
+
+        if certs_ok:
+            print("  Certificates configured successfully.")
+
+    # Step 6: OIDC Login
+    if not args.skip_login:
+        print("\n=== OIDC Login ===")
+        if username and password:
+            token = oidc_login(oidc_issuer, username, password,
+                               gateway_name=gateway_name)
+            if not token:
+                print("  Login failed.", file=sys.stderr)
+        else:
+            print("  Skipping login (no credentials provided).")
+            print("  To login, provide --user and --password, or set KOSH_USER/KOSH_PASSWORD env vars.")
+
+    # Step 7: Summary
+    print("\n=== Setup Complete ===")
+    print(f'\n  alias kosh="uv run {install_dir}/kosh.py"')
+    print(f"\n  Gateway: {gateway_name} -> {gateway_url}")
+
+    mtls_dir = get_openshell_config_dir() / "gateways" / gateway_name / "mtls"
+    for f in ["ca.crt", "tls.crt", "tls.key"]:
+        status = "OK" if (mtls_dir / f).exists() else "MISSING"
+        print(f"  {f}: {status}")
+
+    token_file = get_openshell_config_dir() / "gateways" / gateway_name / "oidc_token.json"
+    print(f"  Token: {'OK' if token_file.exists() else 'NOT LOGGED IN'}")
+
+    # Step 8: Run tests if requested
+    if args.test:
+        print("\n=== Running Test: kosh sandbox list ===")
+        run_test(uv_path, install_dir)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>kagenti-teleport-setup</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.6; color: #333; }
+    h1 { border-bottom: 2px solid #2563eb; padding-bottom: 8px; }
+    code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
+    pre { background: #1e293b; color: #e2e8f0; padding: 16px; border-radius: 8px; overflow-x: auto; }
+    pre code { background: none; padding: 0; color: inherit; }
+    a { color: #2563eb; }
+    .download { display: inline-block; margin: 16px 0; padding: 12px 24px; background: #2563eb; color: white; text-decoration: none; border-radius: 6px; font-weight: 500; }
+    .download:hover { background: #1d4ed8; }
+    table { border-collapse: collapse; width: 100%; margin: 16px 0; }
+    th, td { border: 1px solid #e2e8f0; padding: 8px 12px; text-align: left; }
+    th { background: #f8fafc; }
+  </style>
+</head>
+<body>
+  <h1>kagenti-teleport-setup</h1>
+  <p>Self-contained setup script for <strong>kosh</strong> CLI and OpenShell gateway access. Installs everything needed with no kubectl or cluster access required.</p>
+
+  <a class="download" href="kagenti-teleport-setup.py">Download kagenti-teleport-setup.py</a>
+
+  <h2>Quick Start</h2>
+  <pre><code># Download and run
+
+curl -sSfk -O https://kagenti-teleport-setup-team1.apps.epoc002.ete14.res.ibm.com/kagenti-teleport-setup.py
+uv run kagenti-teleport-setup.py --user alice --password alice123 --test
+
+# Direct uv run (requires TMPDIR to exist)
+mkdir -p "${TMPDIR:-/tmp}" && \
+uv run https://kagenti-teleport-setup-team1.apps.epoc002.ete14.res.ibm.com/kagenti-teleport-setup.py \
+  --user alice --password alice123 --test</code></pre>
+
+  <h2>What it does</h2>
+  <ol>
+    <li>Checks for <code>uv</code>, exits with install instructions if missing</li>
+    <li>Installs <code>kosh.py</code> + support files to <code>$XDG_CONFIG_HOME</code></li>
+    <li>Configures openshell gateway (OIDC auth mode)</li>
+    <li>Installs embedded mTLS certificates (CA + client cert/key)</li>
+    <li>Performs headless OIDC login via PKCE flow</li>
+    <li>Tests with <code>kosh sandbox list</code></li>
+  </ol>
+
+  <h2>Prerequisites</h2>
+  <p>Install <a href="https://docs.astral.sh/uv/">uv</a>:</p>
+  <pre><code>curl -LsSf https://astral.sh/uv/install.sh | sh</code></pre>
+
+  <h2>Test Users</h2>
+  <table>
+    <tr><th>User</th><th>Password</th><th>Role</th><th>Groups</th></tr>
+    <tr><td>alice</td><td>alice123</td><td>openshell-user</td><td>team1</td></tr>
+    <tr><td>bob</td><td>bob123</td><td>openshell-user</td><td>team2</td></tr>
+    <tr><td>admin</td><td>admin123</td><td>openshell-admin</td><td>team1, team2</td></tr>
+  </table>
+
+  <h2>Environment Variables</h2>
+  <table>
+    <tr><th>Variable</th><th>Purpose</th></tr>
+    <tr><td><code>KOSH_GATEWAY_URL</code></td><td>Gateway URL (default: openshell-team1.apps.epoc002.ete14.res.ibm.com)</td></tr>
+    <tr><td><code>KOSH_USER</code></td><td>Username for OIDC login</td></tr>
+    <tr><td><code>KOSH_PASSWORD</code></td><td>Password for OIDC login</td></tr>
+    <tr><td><code>XDG_CONFIG_HOME</code></td><td>Where configs are stored</td></tr>
+  </table>
+</body>
+</html>
