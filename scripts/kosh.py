@@ -118,7 +118,6 @@ def cli() -> None:
 
 
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
-TELEPORT_SH = SCRIPT_DIR / "teleport.sh"
 DEFAULT_MODEL = "claude-opus-4-6"
 WORKSPACE_ROOT = SCRIPT_DIR.parent.parent
 
@@ -127,6 +126,7 @@ DEFAULT_BINARIES = [
     "/usr/bin/node",
     "/usr/local/bin/node",
     "/usr/bin/curl",
+    "/usr/bin/git",
 ]
 
 BUILTIN_PROFILES: dict[str, dict] = {
@@ -209,7 +209,7 @@ def completions(shell: str) -> None:
 
 
 @cli.command()
-@click.option("--directory", "-d", default=None, type=click.Path(exists=True, file_okay=False), help="Project directory to teleport (defaults to last local sandbox).")
+@click.option("--directory", "-d", default=None, help="Project directory to teleport (defaults to last local sandbox).")
 @click.option("--openshell-bin", default=None, help="Path to openshell binary.")
 @click.option("--xdg-config-home", default=None, help="Override XDG_CONFIG_HOME for gateway config.")
 @click.option("--connect/--no-connect", default=False, help="Connect to the sandbox after setup.")
@@ -240,7 +240,22 @@ def teleport(directory: str | None, openshell_bin: str | None, xdg_config_home: 
         sys.exit(1)
 
     if directory:
-        cwd = directory
+        dir_path = pathlib.Path(directory).resolve()
+        if not dir_path.is_dir():
+            # Try as a subdirectory of CWD
+            dir_path = (pathlib.Path.cwd() / directory).resolve()
+        if not dir_path.is_dir():
+            # Try as a registered sandbox name
+            config_dir = _kosh_config_dir()
+            metadata = _read_metadata(config_dir)
+            sb_info = metadata.get("sandboxes", {}).get(directory, {})
+            sb_path = sb_info.get("path")
+            if sb_path and pathlib.Path(sb_path).is_dir():
+                dir_path = pathlib.Path(sb_path)
+        if not dir_path.is_dir():
+            click.echo(f"error: directory '{directory}' not found.", err=True)
+            sys.exit(1)
+        cwd = str(dir_path)
     else:
         config_dir = _kosh_config_dir()
         last = _load_last_sandbox(config_dir)
@@ -307,7 +322,22 @@ def teleport(directory: str | None, openshell_bin: str | None, xdg_config_home: 
         sys.exit(result.returncode)
 
 
-SANDBOX_SH = SCRIPT_DIR / "sandbox.sh"
+def _find_support_file(name: str) -> pathlib.Path:
+    """Find a support file: check SCRIPT_DIR first, then ~/.config/kosh/."""
+    candidate = SCRIPT_DIR / name
+    if candidate.exists():
+        return candidate
+    config_candidate = (pathlib.Path.home() / ".config" / "kosh" / name)
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    if xdg:
+        config_candidate = pathlib.Path(xdg) / "kosh" / name
+    if config_candidate.exists():
+        return config_candidate
+    return candidate
+
+
+TELEPORT_SH = _find_support_file("teleport.sh")
+SANDBOX_SH = _find_support_file("sandbox.sh")
 
 
 def _kosh_config_dir() -> pathlib.Path:
@@ -372,19 +402,20 @@ def _resolve_sandbox_name(sandbox: str | None) -> str:
     sys.exit(1)
 
 
-def _apply_endpoints(sandbox_name: str, endpoints: list[dict], binaries: list[str] | None = None, wait: bool = True) -> int:
+def _apply_endpoints(sandbox_name: str, endpoints: list[dict], binaries: list[str] | None = None, wait: bool = True, all_binaries: bool = False) -> int:
     """Call openshell policy update to add endpoints to a sandbox. Returns exit code."""
     if not endpoints:
         return 0
     openshell = _find_openshell()
-    bins = binaries or DEFAULT_BINARIES
     cmd = [openshell, "policy", "update", sandbox_name]
     for ep in endpoints:
         host = ep["host"]
         port = ep.get("port", 443)
-        cmd.extend(["--add-endpoint", f"{host}:{port}"])
-    for b in bins:
-        cmd.extend(["--binary", b])
+        cmd.extend(["--add-endpoint", f"{host}:{port}:full"])
+    if not all_binaries:
+        bins = binaries or DEFAULT_BINARIES
+        for b in bins:
+            cmd.extend(["--binary", b])
     if wait:
         cmd.append("--wait")
     result = _run(cmd)
@@ -413,12 +444,13 @@ def allow() -> None:
 @click.argument("domains", nargs=-1, required=False)
 @click.option("--sandbox", "-s", default=None, help="Sandbox name (defaults to last used).")
 @click.option("--port", "-p", default=443, type=int, show_default=True, help="Port to allow.")
-@click.option("--binary", "-b", multiple=True, help="Binary paths (defaults to claude + node + curl).")
+@click.option("--binary", "-b", multiple=True, help="Binary paths (defaults to claude + node + curl + git).")
+@click.option("--all-binaries", "-A", is_flag=True, default=False, help="Allow all binaries (no binary restriction).")
 @click.option("--no-wait", is_flag=True, default=False, help="Don't wait for policy reload.")
 @click.option("--no-save", is_flag=True, default=False, help="Don't persist domains to config.")
 @click.option("--from-file", "-f", type=click.Path(exists=True), default=None, help="Read domains from file (one per line).")
 @click.option("--from-json", "-j", type=click.Path(exists=False), default=None, help="Read from JSON (output of 'allow denied --json'). Use '-' for stdin.")
-def allow_add(domains: tuple[str, ...], sandbox: str | None, port: int, binary: tuple[str, ...], no_wait: bool, no_save: bool, from_file: str | None, from_json: str | None) -> None:
+def allow_add(domains: tuple[str, ...], sandbox: str | None, port: int, binary: tuple[str, ...], all_binaries: bool, no_wait: bool, no_save: bool, from_file: str | None, from_json: str | None) -> None:
     """Allow domains on a running sandbox.
 
     Calls openshell policy update to add endpoints. Saves domains to
@@ -432,10 +464,10 @@ def allow_add(domains: tuple[str, ...], sandbox: str | None, port: int, binary: 
     \b
         kosh allow add github.com stackoverflow.com
         kosh allow add github.com,stackoverflow.com,pypi.org
+        kosh allow add github.com -A              # all binaries, no restriction
+        kosh allow add github.com -b /usr/bin/git # specific binary only
         kosh allow add --from-file domains.txt --sandbox test
         kosh allow denied --json | kosh allow add --from-json - --sandbox test
-        kosh allow add --from-json denied.json
-        kosh allow add github.com --sandbox test --port 443
     """
     import json as json_mod
 
@@ -472,7 +504,7 @@ def allow_add(domains: tuple[str, ...], sandbox: str | None, port: int, binary: 
     name = _resolve_sandbox_name(sandbox)
     endpoints = all_endpoints
     bins = list(binary) if binary else None
-    rc = _apply_endpoints(name, endpoints, binaries=bins, wait=not no_wait)
+    rc = _apply_endpoints(name, endpoints, binaries=bins, wait=not no_wait, all_binaries=all_binaries)
     if rc != 0:
         sys.exit(rc)
     click.echo(f"Allowed {len(endpoints)} domain(s) on sandbox '{name}'.")

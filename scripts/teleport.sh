@@ -6,7 +6,7 @@ WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 POLICY_FILE="$SCRIPT_DIR/litellm_sandbox_policy.yaml"
 DOCKERFILE="$SCRIPT_DIR/Dockerfile.sandbox"
 
-export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$WORKSPACE_ROOT/.config}"
+export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 
 MODEL="${KOSH_MODEL:-claude-opus-4-6}"
 
@@ -40,10 +40,14 @@ else
     echo "  export ANTHROPIC_AUTH_TOKEN=<your-token>" >&2
     exit 1
   fi
+  CRED_ARGS=(--credential "ANTHROPIC_AUTH_TOKEN=$ANTHROPIC_AUTH_TOKEN")
+  if [[ -n "${BOBSHELL_API_KEY:-}" ]]; then
+    CRED_ARGS+=(--credential "BOBSHELL_API_KEY=$BOBSHELL_API_KEY")
+  fi
   run_cmd "$OPENSHELL" provider create \
     --name litellm \
     --type generic \
-    --credential "ANTHROPIC_AUTH_TOKEN=$ANTHROPIC_AUTH_TOKEN"
+    "${CRED_ARGS[@]}"
   echo "  litellm provider created."
 fi
 
@@ -183,16 +187,8 @@ if ! run_cmd "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" -- grep -q 'cd \$H
     sh -c "printf 'cd \$HOME\n' >> $BASHRC"
 fi
 
-# Append BOBSHELL_API_KEY if missing (required for Bob shell)
-if [[ -n "${BOBSHELL_API_KEY:-}" ]]; then
-  if ! run_cmd "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" -- grep -q "BOBSHELL_API_KEY" "$BASHRC" 2>/dev/null; then
-    echo "  Adding BOBSHELL_API_KEY..."
-    run_cmd "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" -- \
-      sh -c "printf 'export BOBSHELL_API_KEY=\"$BOBSHELL_API_KEY\"\n' >> $BASHRC"
-  fi
-else
-  echo "  WARNING: BOBSHELL_API_KEY not set in local environment; Bob may not authenticate." >&2
-fi
+# BOBSHELL_API_KEY is injected via openshell provider credential (same as ANTHROPIC_AUTH_TOKEN)
+# No plain-text export needed — openshell resolves it securely at runtime
 
 echo "Verifying .bashrc..."
 run_cmd "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" -- cat "$BASHRC"
@@ -212,31 +208,30 @@ if exec_sb 'export PATH="/sandbox/.npm-global/bin:$PATH" && command -v bob >/dev
   BOB_VERSION=$(exec_sb 'export PATH="/sandbox/.npm-global/bin:$PATH" && bob --version 2>/dev/null | tail -1 | tr -d "[:space:]"' 2>/dev/null || echo "unknown")
   echo "  Bob already installed (version: $BOB_VERSION)."
 else
-  echo "  Setting up npm global prefix..."
-  exec_sb 'mkdir -p /sandbox/.npm-global && npm config set prefix /sandbox/.npm-global' 2>/dev/null
+  echo "  Installing Bob (manual tarball method)..."
 
   # Ensure .npm-global/bin is on PATH in .bashrc
   if ! exec_sb 'grep -q ".npm-global/bin" /sandbox/.bashrc' 2>/dev/null; then
     exec_sb 'echo "export PATH=\"/sandbox/.npm-global/bin:\$PATH\"" >> /sandbox/.bashrc'
   fi
 
-  echo "  Downloading Bob tarball..."
-  if exec_sb 'curl -sfL https://s3.us-south.cloud-object-storage.appdomain.cloud/bobshell/bobshell-latest.tgz -o /tmp/bobshell.tgz && tar tzf /tmp/bobshell.tgz >/dev/null 2>&1' 2>/dev/null; then
-    echo "  Extracting..."
-    exec_sb 'mkdir -p /sandbox/.npm-global/lib/node_modules/bobshell && tar xzf /tmp/bobshell.tgz -C /sandbox/.npm-global/lib/node_modules/bobshell --strip-components=1'
-    exec_sb 'mkdir -p /sandbox/.npm-global/bin && ln -sf ../lib/node_modules/bobshell/bundle/bob.js /sandbox/.npm-global/bin/bob && chmod +x /sandbox/.npm-global/lib/node_modules/bobshell/bundle/bob.js'
-    exec_sb 'rm -f /tmp/bobshell.tgz'
+  # The OpenShell proxy blocks npm metadata requests for scoped packages
+  # (URLs with %2f are reset despite allow_encoded_slash: true).
+  # Workaround: upload bob-install.sh which downloads tarballs directly
+  # using literal slashes (which the proxy allows).
+  BOB_INSTALL_SH="$SCRIPT_DIR/bob-install.sh"
+  if [[ ! -f "$BOB_INSTALL_SH" ]]; then
+    echo "  ERROR: $BOB_INSTALL_SH not found" >&2
+    echo "  Trying official installer as fallback..."
+    exec_sb 'curl -fsSL https://bob.ibm.com/download/bobshell.sh | bash' 2>/dev/null || true
   else
-    echo "  Direct download failed (403 or network issue). Trying local bundle..."
-    # Fall back: bundle from local workspace if setup-bob-sandbox was run before
-    BOB_LOCAL="$WORKSPACE_ROOT/.cache/bobshell-latest.tgz"
-    if [[ -f "$BOB_LOCAL" ]]; then
-      run_cmd "$OPENSHELL" sandbox upload "$SANDBOX_NAME" "$BOB_LOCAL" /sandbox/
-      exec_sb 'mkdir -p /sandbox/.npm-global/lib/node_modules/bobshell && tar xzf /sandbox/bobshell-latest.tgz -C /sandbox/.npm-global/lib/node_modules/bobshell --strip-components=1'
-      exec_sb 'mkdir -p /sandbox/.npm-global/bin && ln -sf ../lib/node_modules/bobshell/bundle/bob.js /sandbox/.npm-global/bin/bob && chmod +x /sandbox/.npm-global/lib/node_modules/bobshell/bundle/bob.js'
-      exec_sb 'rm -f /sandbox/bobshell-latest.tgz'
+    run_cmd "$OPENSHELL" sandbox upload "$SANDBOX_NAME" "$BOB_INSTALL_SH" /tmp/
+    if run_cmd "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" --no-tty -- bash /tmp/bob-install.sh 2>/dev/null; then
+      echo "  Bob tarball install completed."
     else
-      echo "  WARNING: Could not install Bob. Download the tarball manually to $BOB_LOCAL" >&2
+      echo "  WARNING: Bob tarball install failed." >&2
+      echo "  Trying official installer as fallback..."
+      exec_sb 'curl -fsSL https://bob.ibm.com/download/bobshell.sh | bash' 2>/dev/null || true
     fi
   fi
 
@@ -245,7 +240,8 @@ else
     BOB_VERSION=$(exec_sb 'export PATH="/sandbox/.npm-global/bin:$PATH" && bob --version 2>/dev/null | tail -1 | tr -d "[:space:]"' 2>/dev/null || echo "unknown")
     echo "  Bob installed successfully (version: $BOB_VERSION)."
   else
-    echo "  WARNING: Bob installation may have failed." >&2
+    echo "  WARNING: Bob not found after install. Run manually inside sandbox:" >&2
+    echo "    npm install -g https://s3.us-south.cloud-object-storage.appdomain.cloud/bob-shell/bobshell-1.0.4.tgz" >&2
   fi
 fi
 

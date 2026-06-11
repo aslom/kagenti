@@ -51,6 +51,8 @@ SERVED_FILES = [
     "sandbox.sh",
     "agent-sandbox.sb",
     "litellm_sandbox_policy.yaml",
+    "setup-kosh-completions.sh",
+    "bob-install.sh",
     "index.html",
 ]
 

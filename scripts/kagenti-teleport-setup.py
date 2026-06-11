@@ -86,9 +86,10 @@ KOSH_FILES = [
     "kosh.py",
     "teleport.sh",
     "sandbox.sh",
-    "Dockerfile.sandbox",
     "agent-sandbox.sb",
     "litellm_sandbox_policy.yaml",
+    "setup-kosh-completions.sh",
+    "bob-install.sh",
 ]
 
 
@@ -110,13 +111,10 @@ def check_uv() -> str | None:
 
 
 def get_install_dir(custom: str | None = None) -> pathlib.Path:
-    """Determine install directory from XDG_CONFIG_HOME or custom path."""
+    """Determine install directory: custom path, or current working directory."""
     if custom:
         return pathlib.Path(custom).resolve()
-    xdg = os.environ.get("XDG_CONFIG_HOME")
-    if xdg:
-        return pathlib.Path(xdg).resolve()
-    return (pathlib.Path.home() / ".config" / "kosh").resolve()
+    return pathlib.Path.cwd().resolve()
 
 
 def get_openshell_config_dir() -> pathlib.Path:
@@ -155,6 +153,18 @@ def download_source_files(dest_dir: pathlib.Path, server_url: str) -> bool:
 def install(install_dir: pathlib.Path, source_dir: pathlib.Path) -> bool:
     """Copy kosh.py and supporting files to install_dir."""
     install_dir.mkdir(parents=True, exist_ok=True)
+
+    # If source and install are the same directory, nothing to copy
+    if source_dir.resolve() == install_dir.resolve():
+        print(f"  Files already in place at {install_dir}")
+        kosh_py = install_dir / "kosh.py"
+        if kosh_py.exists():
+            kosh_py.chmod(0o755)
+        for filename in KOSH_FILES:
+            f = install_dir / filename
+            if f.exists() and filename.endswith(".sh"):
+                f.chmod(0o755)
+        return True
 
     copied = 0
     for filename in KOSH_FILES:

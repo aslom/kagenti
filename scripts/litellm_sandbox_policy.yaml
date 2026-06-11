@@ -70,6 +70,12 @@ network_policies:
         port: 443
         access: full
         allow_encoded_slash: true
+      - host: "*.npmjs.org"
+        port: 443
+        access: full
+      - host: bob.ibm.com
+        port: 443
+        access: full
       - host: "*.bob.ibm.com"
         port: 443
         access: full
@@ -78,10 +84,14 @@ network_policies:
         access: full
     binaries:
       - path: /usr/bin/curl
+      - path: /usr/bin/npm
       - path: /usr/bin/node
       - path: /usr/local/bin/node
       - path: /usr/local/bin/npm
+      - path: /usr/local/bin/npx
       - path: /sandbox/.npm-global/bin/bob
+      - path: /sandbox/.npm-global/bin/npm
+      - path: /sandbox/.npm-global/bin/npx
   web_search:
     name: Web Search and Fetch
     endpoints:
@@ -109,10 +119,13 @@ network_policies:
     endpoints:
       - host: github.com
         port: 443
+        access: full
       - host: "*.github.com"
         port: 443
+        access: full
       - host: "*.githubusercontent.com"
         port: 443
+        access: full
       - host: stackoverflow.com
         port: 443
       - host: "*.stackoverflow.com"
@@ -140,3 +153,5 @@ network_policies:
       - path: /usr/bin/node
       - path: /usr/local/bin/node
       - path: /usr/bin/curl
+      - path: /usr/bin/git
+      - path: /usr/local/bin/git
