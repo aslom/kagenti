@@ -49,8 +49,8 @@ SERVED_FILES = [
     "kosh.py",
     "teleport.sh",
     "sandbox.sh",
+    "agent-sandbox.sb",
     "litellm_sandbox_policy.yaml",
-    "setup.sh",
     "index.html",
 ]
 

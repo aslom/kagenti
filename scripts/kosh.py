@@ -1141,5 +1141,317 @@ def sync_openshell(gateway: str | None, target_version: str | None, dry_run: boo
     click.echo("\nSync complete.")
 
 
+# ---------------------------------------------------------------------------
+# Kagenti API commands (deploy agents/tools without kubectl)
+# ---------------------------------------------------------------------------
+
+import ssl
+import time
+import urllib.request
+import urllib.parse
+import urllib.error
+
+DEFAULT_KAGENTI_URL = os.environ.get(
+    "KAGENTI_URL",
+    "https://kagenti-backend-kagenti-system.apps.epoc002.ete14.res.ibm.com",
+)
+
+DEFAULT_KAGENTI_KEYCLOAK_URL = os.environ.get(
+    "KAGENTI_KEYCLOAK_URL",
+    "https://keycloak-keycloak.apps.epoc002.ete14.res.ibm.com",
+)
+
+DEFAULT_KAGENTI_REALM = "kagenti"
+DEFAULT_KAGENTI_CLIENT_ID = "admin-cli"
+
+
+def _kagenti_ssl_ctx() -> ssl.SSLContext:
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
+
+
+def _kagenti_token_file() -> pathlib.Path:
+    return _kosh_config_dir() / "kagenti_token.json"
+
+
+def _save_kagenti_token(token_data: dict) -> None:
+    token_file = _kagenti_token_file()
+    token_file.parent.mkdir(parents=True, exist_ok=True)
+    token_file.write_text(json.dumps(token_data, indent=2) + "\n")
+    token_file.chmod(0o600)
+
+
+def _load_kagenti_token() -> dict | None:
+    token_file = _kagenti_token_file()
+    if not token_file.exists():
+        return None
+    try:
+        data = json.loads(token_file.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+    if data.get("expires_at", 0) < time.time():
+        return None
+    return data
+
+
+def _kagenti_request(method: str, path: str, body: dict | None = None) -> dict:
+    """Make authenticated request to Kagenti API."""
+    token_data = _load_kagenti_token()
+    if token_data is None:
+        click.echo("error: Not logged in. Run: kosh login", err=True)
+        sys.exit(1)
+
+    url = f"{token_data['kagenti_url']}{path}"
+    headers = {
+        "Authorization": f"Bearer {token_data['access_token']}",
+        "Content-Type": "application/json",
+    }
+
+    data = json.dumps(body).encode() if body else None
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+
+    try:
+        with urllib.request.urlopen(req, context=_kagenti_ssl_ctx(), timeout=30) as resp:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode() if e.fp else ""
+        try:
+            detail = json.loads(error_body).get("detail", error_body)
+        except json.JSONDecodeError:
+            detail = error_body
+        click.echo(f"error: HTTP {e.code} — {detail}", err=True)
+        sys.exit(1)
+    except (urllib.error.URLError, OSError) as e:
+        click.echo(f"error: {e}", err=True)
+        sys.exit(1)
+
+
+def _parse_env_vars(env_list: tuple[str, ...]) -> list[dict]:
+    """Parse --env KEY=VALUE pairs into API format."""
+    result = []
+    for item in env_list:
+        if "=" not in item:
+            click.echo(f"error: Invalid env format '{item}', expected KEY=VALUE", err=True)
+            sys.exit(1)
+        key, value = item.split("=", 1)
+        result.append({"name": key, "value": value})
+    return result
+
+
+# --- kosh login ---
+
+@cli.command("login")
+@click.option("--kagenti-url", default=DEFAULT_KAGENTI_URL, show_default=True,
+              help="Kagenti backend URL")
+@click.option("--keycloak-url", default=DEFAULT_KAGENTI_KEYCLOAK_URL, show_default=True,
+              help="Keycloak URL")
+@click.option("--user", "-u", required=True, help="Username")
+@click.option("--password", "-p", required=True, help="Password")
+@click.option("--realm", default=DEFAULT_KAGENTI_REALM, show_default=True)
+@click.option("--client-id", default=DEFAULT_KAGENTI_CLIENT_ID, show_default=True)
+def kagenti_login(kagenti_url, keycloak_url, user, password, realm, client_id):
+    """Authenticate with Kagenti (Keycloak password grant)."""
+    token_url = f"{keycloak_url}/realms/{realm}/protocol/openid-connect/token"
+    form_data = urllib.parse.urlencode({
+        "grant_type": "password",
+        "client_id": client_id,
+        "username": user,
+        "password": password,
+        "scope": "openid",
+    }).encode()
+
+    req = urllib.request.Request(token_url, data=form_data, method="POST")
+    req.add_header("Content-Type", "application/x-www-form-urlencoded")
+
+    try:
+        with urllib.request.urlopen(req, context=_kagenti_ssl_ctx(), timeout=15) as resp:
+            token_resp = json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode() if e.fp else ""
+        click.echo(f"error: Login failed (HTTP {e.code}): {error_body}", err=True)
+        sys.exit(1)
+    except (urllib.error.URLError, OSError) as e:
+        click.echo(f"error: Cannot reach Keycloak: {e}", err=True)
+        sys.exit(1)
+
+    expires_in = token_resp.get("expires_in", 300)
+    token_data = {
+        "access_token": token_resp["access_token"],
+        "refresh_token": token_resp.get("refresh_token", ""),
+        "expires_at": time.time() + expires_in,
+        "kagenti_url": kagenti_url.rstrip("/"),
+        "keycloak_url": keycloak_url.rstrip("/"),
+        "realm": realm,
+        "client_id": client_id,
+    }
+    _save_kagenti_token(token_data)
+    click.echo(f"Logged in as {user} (token expires in {expires_in}s)")
+    click.echo(f"  Kagenti: {kagenti_url}")
+    click.echo(f"  Token: {_kagenti_token_file()}")
+
+
+# --- kosh deploy ---
+
+@cli.group("deploy")
+def deploy():
+    """Deploy agents and tools via Kagenti API (no kubectl needed)."""
+
+
+@deploy.command("agent")
+@click.option("--name", required=True, help="Agent name")
+@click.option("--namespace", "-n", default="team1", show_default=True)
+@click.option("--image", required=True, help="Container image URL")
+@click.option("--protocol", default="a2a", show_default=True,
+              type=click.Choice(["a2a", "mcp", "streamable_http"]))
+@click.option("--framework", default="LangGraph", show_default=True)
+@click.option("--port", default=8080, type=int, show_default=True, help="Service port")
+@click.option("--target-port", default=8000, type=int, show_default=True, help="Container port")
+@click.option("--authbridge/--no-authbridge", default=True, show_default=True)
+@click.option("--spire/--no-spire", default=False, show_default=True)
+@click.option("--env", "-e", multiple=True, help="Environment variable (KEY=VALUE)")
+def deploy_agent(name, namespace, image, protocol, framework, port, target_port,
+                 authbridge, spire, env):
+    """Deploy an agent from a container image."""
+    body = {
+        "name": name,
+        "namespace": namespace,
+        "deploymentMethod": "image",
+        "containerImage": image,
+        "protocol": protocol,
+        "framework": framework,
+        "workloadType": "deployment",
+        "authBridgeEnabled": authbridge,
+        "spireEnabled": spire,
+        "servicePorts": [
+            {"name": "http", "port": port, "targetPort": target_port, "protocol": "TCP"}
+        ],
+    }
+    if env:
+        body["envVars"] = _parse_env_vars(env)
+
+    click.echo(f"Deploying agent '{name}' in {namespace} from {image}...")
+    result = _kagenti_request("POST", "/api/v1/agents", body)
+    if result.get("success"):
+        click.echo(f"  OK: {result.get('message', 'Agent created')}")
+    else:
+        click.echo(f"  Failed: {result.get('message', 'Unknown error')}", err=True)
+        sys.exit(1)
+
+
+@deploy.command("tool")
+@click.option("--name", required=True, help="Tool name")
+@click.option("--namespace", "-n", default="team1", show_default=True)
+@click.option("--image", required=True, help="Container image URL")
+@click.option("--protocol", default="streamable_http", show_default=True,
+              type=click.Choice(["streamable_http", "sse", "stdio"]))
+@click.option("--framework", default="Python", show_default=True)
+@click.option("--port", default=8000, type=int, show_default=True, help="Service port")
+@click.option("--target-port", default=8000, type=int, show_default=True, help="Container port")
+@click.option("--env", "-e", multiple=True, help="Environment variable (KEY=VALUE)")
+def deploy_tool(name, namespace, image, protocol, framework, port, target_port, env):
+    """Deploy a tool (MCP server) from a container image."""
+    body = {
+        "name": name,
+        "namespace": namespace,
+        "deploymentMethod": "image",
+        "containerImage": image,
+        "protocol": protocol,
+        "framework": framework,
+        "workloadType": "deployment",
+        "authBridgeEnabled": False,
+        "servicePorts": [
+            {"name": "http", "port": port, "targetPort": target_port, "protocol": "TCP"}
+        ],
+    }
+    if env:
+        body["envVars"] = _parse_env_vars(env)
+
+    click.echo(f"Deploying tool '{name}' in {namespace} from {image}...")
+    result = _kagenti_request("POST", "/api/v1/tools", body)
+    if result.get("success"):
+        click.echo(f"  OK: {result.get('message', 'Tool created')}")
+    else:
+        click.echo(f"  Failed: {result.get('message', 'Unknown error')}", err=True)
+        sys.exit(1)
+
+
+# --- kosh catalog ---
+
+@cli.group("catalog")
+def catalog():
+    """List agents and tools from Kagenti API."""
+
+
+@catalog.command("agents")
+@click.option("--namespace", "-n", default="team1", show_default=True)
+def catalog_agents(namespace):
+    """List deployed agents."""
+    result = _kagenti_request("GET", f"/api/v1/agents?namespace={namespace}")
+    agents = result if isinstance(result, list) else result.get("agents", result.get("items", []))
+    if not agents:
+        click.echo(f"No agents in namespace '{namespace}'.")
+        return
+    click.echo(f"{'NAME':<25} {'PROTOCOL':<12} {'FRAMEWORK':<12} {'IMAGE'}")
+    click.echo(f"{'-'*25} {'-'*12} {'-'*12} {'-'*40}")
+    for a in agents:
+        name = a.get("name", "?")
+        proto = a.get("protocol", "?")
+        fw = a.get("framework", "?")
+        img = a.get("containerImage", a.get("image", "—"))
+        click.echo(f"{name:<25} {proto:<12} {fw:<12} {img}")
+
+
+@catalog.command("tools")
+@click.option("--namespace", "-n", default="team1", show_default=True)
+def catalog_tools(namespace):
+    """List deployed tools."""
+    result = _kagenti_request("GET", f"/api/v1/tools?namespace={namespace}")
+    tools = result if isinstance(result, list) else result.get("tools", result.get("items", []))
+    if not tools:
+        click.echo(f"No tools in namespace '{namespace}'.")
+        return
+    click.echo(f"{'NAME':<25} {'PROTOCOL':<16} {'FRAMEWORK':<12} {'IMAGE'}")
+    click.echo(f"{'-'*25} {'-'*16} {'-'*12} {'-'*40}")
+    for t in tools:
+        name = t.get("name", "?")
+        proto = t.get("protocol", "?")
+        fw = t.get("framework", "?")
+        img = t.get("containerImage", t.get("image", "—"))
+        click.echo(f"{name:<25} {proto:<16} {fw:<12} {img}")
+
+
+# --- kosh undeploy ---
+
+@cli.group("undeploy")
+def undeploy():
+    """Remove deployed agents/tools via Kagenti API."""
+
+
+@undeploy.command("agent")
+@click.option("--name", required=True, help="Agent name")
+@click.option("--namespace", "-n", default="team1", show_default=True)
+@click.confirmation_option(prompt="Delete this agent?")
+def undeploy_agent(name, namespace):
+    """Delete a deployed agent."""
+    click.echo(f"Deleting agent '{name}' from {namespace}...")
+    result = _kagenti_request("DELETE", f"/api/v1/agents/{namespace}/{name}")
+    msg = result.get("message", "Agent deleted") if isinstance(result, dict) else "Agent deleted"
+    click.echo(f"  OK: {msg}")
+
+
+@undeploy.command("tool")
+@click.option("--name", required=True, help="Tool name")
+@click.option("--namespace", "-n", default="team1", show_default=True)
+@click.confirmation_option(prompt="Delete this tool?")
+def undeploy_tool(name, namespace):
+    """Delete a deployed tool."""
+    click.echo(f"Deleting tool '{name}' from {namespace}...")
+    result = _kagenti_request("DELETE", f"/api/v1/tools/{namespace}/{name}")
+    msg = result.get("message", "Tool deleted") if isinstance(result, dict) else "Tool deleted"
+    click.echo(f"  OK: {msg}")
+
+
 if __name__ == "__main__":
     cli(prog_name="kosh")
