@@ -4,7 +4,7 @@ cd $DIR
 
 uv run https://kagenti-teleport-setup-team1.apps.epoc002.ete14.res.ibm.com/kagenti-teleport-setup.py  --user alice --password alice123 --test
 
-alias kosh="uv run $PWD$/kosh.py"
+alias kosh="uv run $PWD/kosh.py"
 # optional setup CLI completion
 ./setup-kosh-completions.sh
 exec zsh

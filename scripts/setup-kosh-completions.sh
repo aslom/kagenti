@@ -2,6 +2,7 @@
 # setup-kosh-completions.sh — Set up shell completions for kosh CLI
 #
 # Auto-detects zsh or bash and installs completions accordingly.
+# Uses a symlink at ~/.local/bin/kosh.py so .zshrc/.bashrc never goes stale.
 #
 # Usage:
 #   ./setup-kosh-completions.sh
@@ -9,71 +10,94 @@
 # Run again after kosh.py changes to regenerate completions.
 set -euo pipefail
 
+KOSH_LINK="${HOME}/.local/bin/kosh.py"
+
 # --- Detect shell ---
 
 detect_shell() {
-  # Check parent process name first
   local parent_shell
   parent_shell=$(ps -o comm= -p $PPID 2>/dev/null | sed 's|.*/||' | sed 's/^-//' || true)
   case "$parent_shell" in
     zsh)  echo "zsh"; return ;;
     bash) echo "bash"; return ;;
   esac
-  # Fall back to $SHELL
   case "${SHELL:-}" in
     */zsh)  echo "zsh" ;;
     */bash) echo "bash" ;;
-    *)      echo "zsh" ;;  # default
+    *)      echo "zsh" ;;
   esac
 }
 
 DETECTED_SHELL=$(detect_shell)
 echo "Detected shell: $DETECTED_SHELL"
 
-# --- Find kosh.py path ---
+# --- Find kosh.py path (CWD first, then script dir, then rc file) ---
 
 find_kosh_py() {
-  local rc_file="$1"
-
-  # 1. Check if kosh alias is defined in rc file
-  local alias_def
-  alias_def=$(grep -E "^alias kosh=" "$rc_file" 2>/dev/null | tail -1 || true)
-  if [[ -n "$alias_def" ]]; then
-    local path
-    path=$(echo "$alias_def" | sed -E 's/.*uv run ([^"]+).*/\1/' | sed 's/[" ]//g')
-    if [[ -f "$path" ]]; then
-      echo "$path"
-      return
-    fi
-  fi
-
-  # 2. Check if kosh function is defined in rc file
-  local func_def
-  func_def=$(grep -E "^kosh\(\)" "$rc_file" 2>/dev/null | tail -1 || true)
-  if [[ -n "$func_def" ]]; then
-    local path
-    path=$(grep -A1 "^kosh()" "$rc_file" | grep -oE '/[^ "]+kosh\.py')
-    if [[ -f "$path" ]]; then
-      echo "$path"
-      return
-    fi
-  fi
-
-  # 3. Check for kosh.py in current directory
+  # 1. Current directory (highest priority — user just ran setup here)
   if [[ -f "./kosh.py" ]]; then
-    echo "$(pwd)/kosh.py"
+    echo "$(pwd -P)/kosh.py"
     return
   fi
 
-  # 4. Check script's own directory
+  # 2. Script's own directory
   local script_dir
-  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
   if [[ -f "$script_dir/kosh.py" ]]; then
     echo "$script_dir/kosh.py"
     return
   fi
 
+  # 3. Existing symlink (if previously set up)
+  if [[ -L "$KOSH_LINK" && -f "$KOSH_LINK" ]]; then
+    readlink -f "$KOSH_LINK"
+    return
+  fi
+
+  # 4. Check rc file for existing function/alias
+  local rc_file="${1:-}"
+  if [[ -n "$rc_file" && -f "$rc_file" ]]; then
+    local func_path
+    func_path=$(grep -A1 "^kosh()" "$rc_file" 2>/dev/null | grep -oE '/[^ "]+kosh\.py' | tail -1 || true)
+    if [[ -n "$func_path" && -f "$func_path" ]]; then
+      echo "$func_path"
+      return
+    fi
+    local alias_path
+    alias_path=$(grep -E "^alias kosh=" "$rc_file" 2>/dev/null | tail -1 | sed -E 's/.*uv run ([^"]+).*/\1/' | sed 's/[" ]//g' || true)
+    if [[ -n "$alias_path" && -f "$alias_path" ]]; then
+      echo "$alias_path"
+      return
+    fi
+  fi
+
   return 1
+}
+
+# --- Create/update symlink ---
+
+setup_symlink() {
+  local target="$1"
+  mkdir -p "$(dirname "$KOSH_LINK")"
+
+  if [[ -L "$KOSH_LINK" ]]; then
+    local current
+    current=$(readlink -f "$KOSH_LINK" 2>/dev/null || true)
+    if [[ "$current" == "$target" ]]; then
+      echo "Symlink up to date: $KOSH_LINK -> $target"
+      return
+    fi
+    echo "Updating symlink: $KOSH_LINK -> $target (was: $current)"
+    ln -sf "$target" "$KOSH_LINK"
+  else
+    if [[ -f "$KOSH_LINK" ]]; then
+      echo "Replacing file with symlink: $KOSH_LINK -> $target"
+      rm -f "$KOSH_LINK"
+    else
+      echo "Creating symlink: $KOSH_LINK -> $target"
+    fi
+    ln -sf "$target" "$KOSH_LINK"
+  fi
 }
 
 # --- Setup for zsh ---
@@ -84,11 +108,14 @@ setup_zsh() {
   local comp_file="${zfunc_dir}/_kosh"
 
   KOSH_PY=$(find_kosh_py "$rc_file") || {
-    echo "error: Cannot find kosh.py. Set up the alias first:" >&2
-    echo "  alias kosh=\"uv run /path/to/kosh.py\"" >&2
+    echo "error: Cannot find kosh.py in current directory or script directory." >&2
+    echo "  Run this from the directory containing kosh.py" >&2
     exit 1
   }
   echo "Found kosh.py: $KOSH_PY"
+
+  # Create/update stable symlink
+  setup_symlink "$KOSH_PY"
 
   # Generate zsh completions
   mkdir -p "$zfunc_dir"
@@ -99,13 +126,13 @@ setup_zsh() {
   sed -i '' 's/(( ! $+commands\[kosh\] )) && return 1/# alias\/function compatible/' "$comp_file" 2>/dev/null || \
   sed -i 's/(( ! $+commands\[kosh\] )) && return 1/# alias\/function compatible/' "$comp_file"
 
-  # Fix: replace bare "kosh" invocation with full uv run path
-  sed -i '' "s|COMP_CWORD=\$((CURRENT-1)) _KOSH_COMPLETE=zsh_complete kosh|COMP_CWORD=\$((CURRENT-1)) _KOSH_COMPLETE=zsh_complete uv run $KOSH_PY|" "$comp_file" 2>/dev/null || \
-  sed -i "s|COMP_CWORD=\$((CURRENT-1)) _KOSH_COMPLETE=zsh_complete kosh|COMP_CWORD=\$((CURRENT-1)) _KOSH_COMPLETE=zsh_complete uv run $KOSH_PY|" "$comp_file"
+  # Fix: replace bare "kosh" invocation with symlink path
+  sed -i '' "s|COMP_CWORD=\$((CURRENT-1)) _KOSH_COMPLETE=zsh_complete kosh|COMP_CWORD=\$((CURRENT-1)) _KOSH_COMPLETE=zsh_complete uv run $KOSH_LINK|" "$comp_file" 2>/dev/null || \
+  sed -i "s|COMP_CWORD=\$((CURRENT-1)) _KOSH_COMPLETE=zsh_complete kosh|COMP_CWORD=\$((CURRENT-1)) _KOSH_COMPLETE=zsh_complete uv run $KOSH_LINK|" "$comp_file"
 
   echo "Written: $comp_file"
 
-  # Update .zshrc if needed
+  # Update .zshrc — always use the symlink path (never a hardcoded project path)
   local fpath_line='fpath=(~/.zfunc $fpath)'
   if ! grep -qF "$fpath_line" "$rc_file" 2>/dev/null; then
     echo "" >> "$rc_file"
@@ -117,20 +144,34 @@ setup_zsh() {
     echo "fpath already configured in $rc_file"
   fi
 
-  # Ensure kosh is defined as function (not just alias) for completion to work
-  if ! grep -qE "^kosh\(\)" "$rc_file" 2>/dev/null; then
+  # Remove any old hardcoded kosh function/alias, replace with symlink-based one
+  if grep -qE "^kosh\(\)" "$rc_file" 2>/dev/null; then
+    # Check if it already points to the symlink
+    if grep -A1 "^kosh()" "$rc_file" | grep -qF "$KOSH_LINK"; then
+      echo "kosh() function already uses symlink"
+    else
+      echo "Updating kosh() function to use symlink..."
+      sed -i '' '/^kosh()/,/^}/d' "$rc_file" 2>/dev/null || \
+      sed -i '/^kosh()/,/^}/d' "$rc_file"
+      echo "kosh() { uv run \"$KOSH_LINK\" \"\$@\"; }" >> "$rc_file"
+      echo "Updated kosh() function in $rc_file"
+    fi
+  else
+    # Comment out any alias, add function
     if grep -qE "^alias kosh=" "$rc_file" 2>/dev/null; then
-      echo "Note: Replacing alias with function (required for zsh completions)"
       sed -i '' "s|^alias kosh=.*|# & # replaced by function below|" "$rc_file" 2>/dev/null || \
       sed -i "s|^alias kosh=.*|# & # replaced by function below|" "$rc_file"
     fi
-    echo "kosh() { uv run \"$KOSH_PY\" \"\$@\"; }" >> "$rc_file"
-    echo "Added kosh() function to $rc_file"
+    echo "kosh() { uv run \"$KOSH_LINK\" \"\$@\"; }" >> "$rc_file"
+    echo "Added kosh() function to $rc_file (uses symlink)"
   fi
 
   echo ""
   echo "Done! Reload your shell:"
   echo "  exec zsh"
+  echo ""
+  echo "To switch kosh.py to a different directory:"
+  echo "  ln -sf /path/to/new/kosh.py $KOSH_LINK"
 }
 
 # --- Setup for bash ---
@@ -141,38 +182,41 @@ setup_bash() {
   local comp_file="${comp_dir}/kosh"
 
   KOSH_PY=$(find_kosh_py "$rc_file") || {
-    # Also check .zshrc in case user has it there
-    KOSH_PY=$(find_kosh_py "${HOME}/.zshrc") || {
-      echo "error: Cannot find kosh.py. Set up the alias first:" >&2
-      echo "  alias kosh=\"uv run /path/to/kosh.py\"" >&2
-      exit 1
-    }
+    echo "error: Cannot find kosh.py in current directory or script directory." >&2
+    echo "  Run this from the directory containing kosh.py" >&2
+    exit 1
   }
   echo "Found kosh.py: $KOSH_PY"
+
+  # Create/update stable symlink
+  setup_symlink "$KOSH_PY"
 
   # Generate bash completions
   mkdir -p "$comp_dir"
   echo "Generating bash completions..."
   uv run "$KOSH_PY" completions bash > "$comp_file"
 
-  # Fix: replace bare "kosh" invocation with full uv run path
-  sed -i '' "s|_KOSH_COMPLETE=bash_complete kosh|_KOSH_COMPLETE=bash_complete uv run $KOSH_PY|g" "$comp_file" 2>/dev/null || \
-  sed -i "s|_KOSH_COMPLETE=bash_complete kosh|_KOSH_COMPLETE=bash_complete uv run $KOSH_PY|g" "$comp_file"
+  # Fix: replace bare "kosh" invocation with symlink path
+  sed -i '' "s|_KOSH_COMPLETE=bash_complete kosh|_KOSH_COMPLETE=bash_complete uv run $KOSH_LINK|g" "$comp_file" 2>/dev/null || \
+  sed -i "s|_KOSH_COMPLETE=bash_complete kosh|_KOSH_COMPLETE=bash_complete uv run $KOSH_LINK|g" "$comp_file"
 
   echo "Written: $comp_file"
 
-  # Ensure kosh alias/function exists in .bashrc
-  if ! grep -qE "(^alias kosh=|^kosh\(\))" "$rc_file" 2>/dev/null; then
+  # Ensure kosh alias uses symlink
+  # Remove old hardcoded alias/function
+  sed -i '' '/^alias kosh=/d' "$rc_file" 2>/dev/null || sed -i '/^alias kosh=/d' "$rc_file"
+  sed -i '' '/^kosh()/,/^}/d' "$rc_file" 2>/dev/null || sed -i '/^kosh()/,/^}/d' "$rc_file"
+
+  if ! grep -qF "$KOSH_LINK" "$rc_file" 2>/dev/null; then
     echo "" >> "$rc_file"
     echo "# kosh CLI" >> "$rc_file"
-    echo "alias kosh=\"uv run $KOSH_PY\"" >> "$rc_file"
-    echo "Added kosh alias to $rc_file"
+    echo "alias kosh=\"uv run $KOSH_LINK\"" >> "$rc_file"
+    echo "Added kosh alias to $rc_file (uses symlink)"
   fi
 
-  # Source completions from .bashrc if not using bash-completion framework
+  # Source completions if bash-completion framework not detected
   local source_line="source \"$comp_file\""
   if ! grep -qF "$comp_file" "$rc_file" 2>/dev/null; then
-    # Check if bash-completion is loaded (it auto-discovers ~/.local/share/bash-completion/)
     if ! grep -qE "(bash.completion|bash_completion)" "$rc_file" 2>/dev/null; then
       echo "" >> "$rc_file"
       echo "# kosh completions" >> "$rc_file"
@@ -186,6 +230,9 @@ setup_bash() {
   echo ""
   echo "Done! Reload your shell:"
   echo "  source ~/.bashrc"
+  echo ""
+  echo "To switch kosh.py to a different directory:"
+  echo "  ln -sf /path/to/new/kosh.py $KOSH_LINK"
 }
 
 # --- Main ---

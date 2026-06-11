@@ -73,6 +73,11 @@ echo "Sandbox name: $SANDBOX_NAME"
 echo "Checking for existing sandbox '$SANDBOX_NAME'..."
 if run_cmd "$OPENSHELL" sandbox list 2>&1 | grep -qw "$SANDBOX_NAME"; then
   echo "  Sandbox '$SANDBOX_NAME' already exists."
+  # Update policy on existing sandbox to pick up any changes
+  if [[ -f "$POLICY_FILE" ]]; then
+    echo "  Syncing policy..."
+    run_cmd "$OPENSHELL" policy set "$SANDBOX_NAME" --policy "$POLICY_FILE" --wait || true
+  fi
 else
   echo "  Creating sandbox '$SANDBOX_NAME'..."
   if [[ ! -f "$POLICY_FILE" ]]; then
@@ -246,7 +251,5 @@ else
 fi
 
 echo ""
-echo "Done. Connect with:"
-echo "  $OPENSHELL sandbox connect $SANDBOX_NAME"
-
-
+echo "Done. Connecting to sandbox '$SANDBOX_NAME'..."
+exec "$OPENSHELL" sandbox connect "$SANDBOX_NAME"

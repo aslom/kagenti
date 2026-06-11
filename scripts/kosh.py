@@ -127,6 +127,8 @@ DEFAULT_BINARIES = [
     "/usr/local/bin/node",
     "/usr/bin/curl",
     "/usr/bin/git",
+    "/usr/lib/git-core/git-remote-http",
+    "/usr/lib/git-core/git-remote-https",
 ]
 
 BUILTIN_PROFILES: dict[str, dict] = {

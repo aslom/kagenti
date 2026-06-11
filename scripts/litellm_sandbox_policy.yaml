@@ -155,3 +155,5 @@ network_policies:
       - path: /usr/bin/curl
       - path: /usr/bin/git
       - path: /usr/local/bin/git
+      - path: /usr/lib/git-core/git-remote-http
+      - path: /usr/lib/git-core/git-remote-https
