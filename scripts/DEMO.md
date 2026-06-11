@@ -2,6 +2,9 @@
 ```bash
 cd $DIR
 
+# check directory is empty
+find .
+
 uv run https://kagenti-teleport-setup-team1.apps.epoc002.ete14.res.ibm.com/kagenti-teleport-setup.py  --user alice --password alice123 --test
 
 alias kosh="uv run $PWD/kosh.py"
@@ -19,15 +22,16 @@ kosh sandbox list
 # export ANTHROPIC_BASE_URL="https://ete-litellm.ai-models.vpc-int.res.ibm.com"
 # export ANTHROPIC_MODEL=claude-opus-4-6
 
+export AGENT_NAME=${USER}-agent1
 
-kosh local-sandbox create --name ross1 --model claude-opus-4-6
+kosh local-sandbox create --name $AGENT_NAME --model claude-opus-4-6
 
 # pwd
 # ls /Users/aslom
 # claude
 # exit
 
-kosh local-sandbox connect --name ross1
+kosh local-sandbox connect --name $AGENT_NAME
 
 # claude -r
 
@@ -37,7 +41,7 @@ kosh teleport
 
 kosh sandbox list
 
-kosh sandbox connect ross1
+kosh sandbox connect $AGENT_NAME
 
 # id
 # env|grep ANTH
@@ -62,4 +66,23 @@ ls .claude/skills/
 
 claude -r
 
+# prompt:
 # run /kwiki cli query skill for Kagenti form wiki running at https://wiki-memory-service-team1.apps.ykt1.hcp.res.ibm.com/
+
+## Running headless agent
+
+kosh sandbox exec -n aslom-agent1 -- claude --dangerously-skip-permissions -p 'run /kwiki cli query skill for Kagenti form wiki running at https://wiki-memory-service-team1.apps.ykt1.hcp.res.ibm.com/'
+
+
+## Using Kagenti from CLI. deploy agents and tools
+
+
+kosh login --kagenti-url https://kagenti-backend-kagenti-system.apps.epoc002.ete14.res.ibm.com --keycloak-url https://keycloak-keycloak.apps.epoc002.ete14.res.ibm.com --user dev-user --password UonNQPfcSmzPmDSP
+
+
+kosh deploy tool --name weather-tool --namespace team1 --image ghcr.io/kagenti/agent-examples/weather_tool:latest --protocol streamable_http --port 8000 --target-port     8000     
+
+kosh deploy agent --name weather-service --namespace team1 --image ghcr.io/kagenti/agent-examples/weather_service:latest --protocol a2a --framework LangGraph --port 8080      --target-port 8000 --authbridge --spire
+
+kosh catalog agents -n team1
+kosh catalog tools -n team1

@@ -99,13 +99,28 @@ class KoshGroup(click.Group):
         formatter.write("Kagenti OpenShell CLI — all openshell commands plus kagenti extras.\n")
 
 
+_NOISE_PATTERNS = (
+    "DEBUG openshell_sandbox::sandbox::linux::seccomp",
+)
+
+
 def _make_passthrough(name: str) -> click.Command:
     @click.command(name, context_settings={"ignore_unknown_options": True, "allow_extra_args": True})
     @click.pass_context
     def proxy(ctx: click.Context) -> None:
         openshell = _find_openshell()
-        result = _run([openshell, name, *ctx.args])
-        sys.exit(result.returncode)
+        cmd = [openshell, name, *ctx.args]
+        cwd = None
+        click.echo(f"+ {shlex.join(cmd)}", err=True)
+        proc = subprocess.Popen(
+            cmd, stdin=sys.stdin, stdout=sys.stdout,
+            stderr=subprocess.PIPE, text=True,
+        )
+        for line in proc.stderr:
+            if any(pat in line for pat in _NOISE_PATTERNS):
+                continue
+            sys.stderr.write(line)
+        sys.exit(proc.wait())
 
     proxy.help = f"(passthrough) openshell {name}"
     return proxy
