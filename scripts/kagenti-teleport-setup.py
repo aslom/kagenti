@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import argparse
 import base64
+import datetime
+import hashlib
 import json
 import os
 import pathlib
@@ -125,12 +127,58 @@ def get_openshell_config_dir() -> pathlib.Path:
     return pathlib.Path.home() / ".config" / "openshell"
 
 
+ROSSCONFIG_FILE = "rossconfig.json"
+
+
+def _compute_file_hash(path: pathlib.Path) -> str:
+    """Compute SHA-256 hash of a file's contents."""
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _load_rossconfig(dest_dir: pathlib.Path) -> dict:
+    """Load rossconfig.json from dest_dir. Returns empty dict if not found."""
+    rc_path = dest_dir / ROSSCONFIG_FILE
+    if rc_path.exists():
+        try:
+            return json.loads(rc_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            return {}
+    return {}
+
+
+def _save_rossconfig(dest_dir: pathlib.Path, config: dict) -> None:
+    """Save rossconfig.json to dest_dir."""
+    rc_path = dest_dir / ROSSCONFIG_FILE
+    rc_path.write_text(json.dumps(config, indent=2) + "\n")
+
+
+def _versioned_filename(filename: str) -> str:
+    """Generate a versioned filename using current UTC time (YYYY-MM-DD-HHMM)."""
+    now = datetime.datetime.now(datetime.timezone.utc)
+    stamp = now.strftime("%Y-%m-%d-%H%M")
+    stem = pathlib.Path(filename).stem
+    suffix = pathlib.Path(filename).suffix
+    return f"{stem}-{stamp}{suffix}"
+
+
 def download_source_files(dest_dir: pathlib.Path, server_url: str) -> bool:
-    """Download kosh support files from the remote server."""
+    """Download kosh support files from the remote server.
+
+    Tracks file hashes in rossconfig.json. If a local file was modified
+    (hash differs from recorded), the new download is saved with a
+    date-stamped name instead of overwriting.
+    """
     dest_dir.mkdir(parents=True, exist_ok=True)
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
+
+    rossconfig = _load_rossconfig(dest_dir)
+    files_info = rossconfig.get("files", {})
 
     downloaded = 0
     for filename in KOSH_FILES:
@@ -139,12 +187,45 @@ def download_source_files(dest_dir: pathlib.Path, server_url: str) -> bool:
         try:
             req = urllib.request.Request(url)
             with urllib.request.urlopen(req, context=ctx, timeout=15) as resp:
-                dst.write_bytes(resp.read())
-            downloaded += 1
+                new_content = resp.read()
+                etag = resp.headers.get("ETag", "").strip('"')
         except (urllib.error.URLError, OSError):
             if filename == "kosh.py":
                 print(f"  ERROR: Failed to download required file: {url}", file=sys.stderr)
                 return False
+            continue
+
+        new_hash = hashlib.sha256(new_content).hexdigest()
+
+        if dst.exists():
+            current_hash = _compute_file_hash(dst)
+            recorded_hash = files_info.get(filename, {}).get("hash")
+
+            if recorded_hash and current_hash != recorded_hash:
+                versioned_name = _versioned_filename(filename)
+                versioned_dst = dest_dir / versioned_name
+                versioned_dst.write_bytes(new_content)
+                print(f"  Local changes in {filename} — new version saved as {versioned_name}")
+                files_info[filename] = {
+                    "hash": current_hash,
+                    "etag": etag,
+                    "latest_version": versioned_name,
+                    "latest_hash": new_hash,
+                }
+                downloaded += 1
+                continue
+
+        dst.write_bytes(new_content)
+        files_info[filename] = {
+            "hash": new_hash,
+            "etag": etag,
+        }
+        downloaded += 1
+
+    rossconfig["files"] = files_info
+    rossconfig["last_updated"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    rossconfig["server_url"] = server_url
+    _save_rossconfig(dest_dir, rossconfig)
 
     print(f"  Downloaded {downloaded} file(s) from {server_url}")
     return True
