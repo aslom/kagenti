@@ -32,19 +32,37 @@ data:
                 h.update(chunk)
         return f'"{h.hexdigest()}"'
 
+    DEV_PREFIX = "/dev/"
+    DEV_FILE_PREFIX = "dev--"
+
     class Handler(http.server.SimpleHTTPRequestHandler):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, directory=DIRECTORY, **kwargs)
+
+        def _resolve_path(self):
+            """Resolve request path to filesystem path, handling /dev/ prefix.
+
+            Returns (fs_path, is_dev). For /dev/foo.py, looks up dev--foo.py on disk.
+            """
+            if self.path.startswith(DEV_PREFIX):
+                rel = self.path[len(DEV_PREFIX):]
+                fs_name = DEV_FILE_PREFIX + rel
+                fs_path = os.path.join(DIRECTORY, fs_name)
+                return fs_path, True
+            return self.translate_path(self.path), False
 
         def send_head(self):
             """Override to add ETag and handle If-None-Match (conditional GET/HEAD)."""
             if self.path == "/health":
                 return None
-            if self.path == "/checksums":
+            if self.path == "/checksums" or self.path == "/dev/checksums":
                 return None
 
-            path = self.translate_path(self.path)
+            path, is_dev = self._resolve_path()
             if not os.path.isfile(path):
+                if is_dev:
+                    self.send_error(404, "File not found")
+                    return None
                 return super().send_head()
 
             etag = compute_etag(path)
@@ -60,7 +78,30 @@ data:
                     self.end_headers()
                     return None
 
+            if is_dev:
+                return self._send_file(path)
+
             f = super().send_head()
+            return f
+
+        def _send_file(self, path):
+            """Open and send a file directly (for dev channel files)."""
+            import io
+            try:
+                f = open(path, "rb")
+            except OSError:
+                self.send_error(404, "File not found")
+                return None
+            fs = os.fstat(f.fileno())
+            self.send_response(200)
+            self.send_header("Content-Length", str(fs.st_size))
+            self.send_header("ETag", compute_etag(path))
+            self.send_header("Cache-Control", "no-cache")
+            if path.endswith(".py") or path.endswith(".sh"):
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.send_header("Content-Disposition", "inline")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
             return f
 
         def end_headers(self):
@@ -88,7 +129,10 @@ data:
                 self.wfile.write(b"ok\n")
                 return
             if self.path == "/checksums":
-                self._serve_checksums()
+                self._serve_checksums(dev=False)
+                return
+            if self.path == "/dev/checksums":
+                self._serve_checksums(dev=True)
                 return
             f = self.send_head()
             if f:
@@ -97,13 +141,20 @@ data:
                 finally:
                     f.close()
 
-        def _serve_checksums(self):
-            """Return JSON mapping of filename -> ETag for all served files."""
+        def _serve_checksums(self, dev=False):
+            """Return JSON mapping of filename -> ETag for served files."""
             content_dir = pathlib.Path(DIRECTORY)
             checksums = {}
             for p in sorted(content_dir.iterdir()):
-                if p.is_file() and not p.name.startswith("."):
-                    checksums[p.name] = compute_etag(str(p))
+                if not p.is_file() or p.name.startswith("."):
+                    continue
+                if dev:
+                    if p.name.startswith(DEV_FILE_PREFIX):
+                        public_name = p.name[len(DEV_FILE_PREFIX):]
+                        checksums[public_name] = compute_etag(str(p))
+                else:
+                    if not p.name.startswith(DEV_FILE_PREFIX):
+                        checksums[p.name] = compute_etag(str(p))
             body = json.dumps(checksums, indent=2).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")

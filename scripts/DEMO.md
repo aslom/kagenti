@@ -5,6 +5,9 @@ cd $DIR
 # check directory is empty
 find .
 
+# make sure ANTHROPIC_AUTH_TOKEN is set
+[ -z "$ANTHROPIC_AUTH_TOKEN" ] && echo "Error: ANTHROPIC_AUTH_TOKEN is not set"
+
 uv run https://kagenti-teleport-setup-team1.apps.epoc002.ete14.res.ibm.com/kagenti-teleport-setup.py  --user alice --password alice123 --test
 
 alias kosh="uv run $PWD/kosh.py"
@@ -15,6 +18,9 @@ exec zsh
 kosh local-sandbox list
 
 kosh sandbox list
+
+# possible cleanup
+kosh sandbox delete $AGENT_NAME
 
 # export CLAUDE_AUTH_TOKEN=...
 # export CLAUDE_CODE_DISABLE_MOUSE=1
@@ -55,7 +61,17 @@ kosh sandbox connect $AGENT_NAME
 
 claude -p "say hi"
 
+exit
+
+## === running headless agent
+
+kosh sandbox exec -n aslom-agent1 -- claude --dangerously-skip-permissions -p 'say hi from kagenti opehsell sandbox'
+
+
+
 # === use kwiki skills
+
+kosh sandbox connect $AGENT_NAME
 
 git clone https://github.com/kagenti/agent-examples.git
 
@@ -66,10 +82,12 @@ ls .claude/skills/
 
 claude -r
 
-# prompt:
+# run prompt:
 # run /kwiki cli query skill for Kagenti form wiki running at https://wiki-memory-service-team1.apps.ykt1.hcp.res.ibm.com/
 
-## Running headless agent
+exit
+
+## === running headless agent
 
 kosh sandbox exec -n aslom-agent1 -- claude --dangerously-skip-permissions -p 'run /kwiki cli query skill for Kagenti form wiki running at https://wiki-memory-service-team1.apps.ykt1.hcp.res.ibm.com/'
 

@@ -7,13 +7,21 @@ Single script that handles the full lifecycle:
 3. If files differ: update ConfigMap, restart deployment
 4. Verify all updates are reflected in the remote pod
 
+Supports two channels:
+- stable (default): fetches from GitHub kosh branch HEAD
+- dev (--dev flag): uses local working tree files
+
+Both channels coexist in the same ConfigMap. Dev files use a "dev--" key prefix.
+
 Uses /checksums endpoint for efficient bulk comparison (one request returns
 all file ETags). Individual files can also be checked via HEAD + If-None-Match
 which returns 304 Not Modified if the file hasn't changed.
 
 Usage:
-    uv run kagenti/scripts/sync-kagenti-teleport-setup.py           # Sync if needed
-    uv run kagenti/scripts/sync-kagenti-teleport-setup.py --status  # Check only
+    uv run kagenti/scripts/sync-kagenti-teleport-setup.py           # Sync stable from GitHub
+    uv run kagenti/scripts/sync-kagenti-teleport-setup.py --dev     # Sync dev from local
+    uv run kagenti/scripts/sync-kagenti-teleport-setup.py --status  # Check stable status
+    uv run kagenti/scripts/sync-kagenti-teleport-setup.py --dev --status  # Check dev status
     uv run kagenti/scripts/sync-kagenti-teleport-setup.py --deploy  # Initial deploy
     uv run kagenti/scripts/sync-kagenti-teleport-setup.py --force   # Force redeploy
 """
@@ -28,6 +36,7 @@ import shutil
 import ssl
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.request
 import urllib.error
@@ -55,6 +64,11 @@ SERVED_FILES = [
     "bob-install.sh",
     "index.html",
 ]
+
+DEV_FILE_PREFIX = "dev--"
+GITHUB_REPO = "kagenti/kagenti"
+GITHUB_BRANCH = "kosh"
+GITHUB_SCRIPTS_PATH = "scripts"
 
 
 # ---------------------------------------------------------------------------
@@ -89,6 +103,62 @@ def ssl_context() -> ssl.SSLContext:
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
     return ctx
+
+
+# ---------------------------------------------------------------------------
+# GitHub fetch (for stable channel)
+# ---------------------------------------------------------------------------
+
+def fetch_github_commit_sha(branch: str = GITHUB_BRANCH) -> str | None:
+    """Get latest commit SHA on the given branch via gh CLI."""
+    try:
+        result = subprocess.run(
+            ["gh", "api", f"repos/{GITHUB_REPO}/commits/{branch}", "--jq", ".sha"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+    return None
+
+
+def fetch_stable_files(tmp_dir: pathlib.Path) -> bool:
+    """Download served files from GitHub kosh branch into tmp_dir.
+
+    Returns True if at least kosh.py was downloaded successfully.
+    """
+    sha = fetch_github_commit_sha()
+    if not sha:
+        print("  ERROR: Could not fetch latest commit SHA from GitHub.", file=sys.stderr)
+        print("  Make sure 'gh' CLI is installed and authenticated.", file=sys.stderr)
+        return False
+
+    print(f"  GitHub {GITHUB_REPO}@{GITHUB_BRANCH}: {sha[:12]}")
+    ctx = ssl.create_default_context()
+
+    fetched = 0
+    for filename in SERVED_FILES:
+        if filename == "index.html":
+            src_path = f"scripts/k8s/index.html"
+        else:
+            src_path = f"{GITHUB_SCRIPTS_PATH}/{filename}"
+
+        url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{sha}/{src_path}"
+        dst = tmp_dir / filename
+        try:
+            req = urllib.request.Request(url)
+            with urllib.request.urlopen(req, context=ctx, timeout=15) as resp:
+                dst.write_bytes(resp.read())
+            fetched += 1
+        except (urllib.error.URLError, OSError) as e:
+            if filename == "kagenti-teleport-setup.py" or filename == "kosh.py":
+                print(f"  ERROR: Failed to download {filename}: {e}", file=sys.stderr)
+                return False
+            print(f"  WARNING: Could not fetch {filename}: {e}")
+
+    print(f"  Fetched {fetched} file(s) from GitHub")
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -145,24 +215,26 @@ def get_route_url(kubectl: str, kubeconfig: str) -> str:
 # Step 2: Compare files using HTTP ETags
 # ---------------------------------------------------------------------------
 
-def fetch_checksums(route_url: str) -> dict[str, str] | None:
-    """GET /checksums → {filename: ETag}. Returns None if unreachable."""
-    url = f"{route_url}/checksums"
+def fetch_checksums(route_url: str, dev: bool = False) -> dict[str, str] | None:
+    """GET /checksums or /dev/checksums → {filename: ETag}. Returns None if unreachable."""
+    endpoint = "/dev/checksums" if dev else "/checksums"
+    url = f"{route_url}{endpoint}"
     try:
         req = urllib.request.Request(url)
         with urllib.request.urlopen(req, context=ssl_context(), timeout=15) as resp:
             return json.loads(resp.read())
     except (urllib.error.URLError, OSError, json.JSONDecodeError) as e:
-        print(f"  /checksums unavailable: {e}", file=sys.stderr)
+        print(f"  {endpoint} unavailable: {e}", file=sys.stderr)
         return None
 
 
-def compare_all(route_url: str) -> tuple[list[str], list[str], list[str]]:
+def compare_all(route_url: str, dev: bool = False,
+                source_dir: pathlib.Path | None = None) -> tuple[list[str], list[str], list[str]]:
     """Compare all served files via /checksums.
 
     Returns (changed, missing_remote, missing_local).
     """
-    remote_checksums = fetch_checksums(route_url)
+    remote_checksums = fetch_checksums(route_url, dev=dev)
 
     changed: list[str] = []
     missing_remote: list[str] = []
@@ -170,15 +242,24 @@ def compare_all(route_url: str) -> tuple[list[str], list[str], list[str]]:
 
     if remote_checksums is None:
         for f in SERVED_FILES:
-            if local_file_path(f):
+            if source_dir:
+                if (source_dir / f).exists():
+                    changed.append(f)
+            elif local_file_path(f):
                 changed.append(f)
         return changed, missing_remote, missing_local
 
     for filename in SERVED_FILES:
-        lpath = local_file_path(filename)
-        if lpath is None:
-            missing_local.append(filename)
-            continue
+        if source_dir:
+            lpath = source_dir / filename
+            if not lpath.exists():
+                missing_local.append(filename)
+                continue
+        else:
+            lpath = local_file_path(filename)
+            if lpath is None:
+                missing_local.append(filename)
+                continue
 
         local_etag = compute_etag(lpath)
         remote_etag = remote_checksums.get(filename)
@@ -195,39 +276,86 @@ def compare_all(route_url: str) -> tuple[list[str], list[str], list[str]]:
 # Step 3: Update ConfigMap + restart deployment
 # ---------------------------------------------------------------------------
 
-def update_configmap(kubectl: str, kubeconfig: str) -> bool:
-    """Update content ConfigMap from all local served files."""
+def update_configmap(kubectl: str, kubeconfig: str, dev: bool = False,
+                     source_dir: pathlib.Path | None = None) -> bool:
+    """Update content ConfigMap from served files.
+
+    When dev=True, files are stored with "dev--" prefix in ConfigMap keys.
+    When source_dir is provided, files are read from there instead of the default locations.
+    Preserves existing keys from the other channel.
+    """
     print("  Updating ConfigMap...")
+
+    prefix = DEV_FILE_PREFIX if dev else ""
 
     from_file_args = []
     for filename in SERVED_FILES:
-        lpath = local_file_path(filename)
-        if lpath:
-            from_file_args.append(f"--from-file={filename}={lpath}")
+        if source_dir:
+            lpath = source_dir / filename
+            if not lpath.exists():
+                continue
+        else:
+            lpath = local_file_path(filename)
+            if not lpath:
+                continue
+        key = f"{prefix}{filename}"
+        from_file_args.append(f"--from-file={key}={lpath}")
 
     if not from_file_args:
-        print("  ERROR: No local files found", file=sys.stderr)
+        print("  ERROR: No files found to sync", file=sys.stderr)
         return False
 
-    cmd = [
-        kubectl, f"--kubeconfig={kubeconfig}", f"--namespace={NAMESPACE}",
-        "create", "configmap", CONFIGMAP_NAME,
-    ] + from_file_args + ["--dry-run=client", "-o", "yaml"]
-
-    create_result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-    if create_result.returncode != 0:
-        print(f"  ERROR: {create_result.stderr}", file=sys.stderr)
-        return False
-
-    apply_result = subprocess.run(
-        [kubectl, f"--kubeconfig={kubeconfig}", f"--namespace={NAMESPACE}", "apply", "-f", "-"],
-        input=create_result.stdout, capture_output=True, text=True, timeout=30,
+    # Fetch existing ConfigMap to preserve keys from the other channel
+    get_result = subprocess.run(
+        [kubectl, f"--kubeconfig={kubeconfig}", f"--namespace={NAMESPACE}",
+         "get", "configmap", CONFIGMAP_NAME, "-o", "json"],
+        capture_output=True, text=True, timeout=15,
     )
-    if apply_result.returncode != 0:
-        print(f"  ERROR: {apply_result.stderr}", file=sys.stderr)
-        return False
 
-    print(f"  ConfigMap updated ({len(from_file_args)} files).")
+    existing_keys: dict[str, str] = {}
+    if get_result.returncode == 0:
+        try:
+            cm_data = json.loads(get_result.stdout).get("data", {})
+            for key, val in cm_data.items():
+                # Keep keys from the OTHER channel
+                if dev and not key.startswith(DEV_FILE_PREFIX):
+                    existing_keys[key] = val
+                elif not dev and key.startswith(DEV_FILE_PREFIX):
+                    existing_keys[key] = val
+        except (json.JSONDecodeError, KeyError):
+            pass
+
+    # Write preserved keys to temp files so we can include them in --from-file
+    tmp_preserve_dir = pathlib.Path(tempfile.mkdtemp(prefix="kts-preserve-"))
+    try:
+        for key, val in existing_keys.items():
+            tmp_file = tmp_preserve_dir / key
+            tmp_file.write_text(val)
+            from_file_args.append(f"--from-file={key}={tmp_file}")
+
+        cmd = [
+            kubectl, f"--kubeconfig={kubeconfig}", f"--namespace={NAMESPACE}",
+            "create", "configmap", CONFIGMAP_NAME,
+        ] + from_file_args + ["--dry-run=client", "-o", "yaml"]
+
+        create_result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if create_result.returncode != 0:
+            print(f"  ERROR: {create_result.stderr}", file=sys.stderr)
+            return False
+
+        apply_result = subprocess.run(
+            [kubectl, f"--kubeconfig={kubeconfig}", f"--namespace={NAMESPACE}",
+             "apply", "--server-side", "--force-conflicts", "-f", "-"],
+            input=create_result.stdout, capture_output=True, text=True, timeout=30,
+        )
+        if apply_result.returncode != 0:
+            print(f"  ERROR: {apply_result.stderr}", file=sys.stderr)
+            return False
+    finally:
+        shutil.rmtree(tmp_preserve_dir, ignore_errors=True)
+
+    channel = "dev" if dev else "stable"
+    print(f"  ConfigMap updated ({len(from_file_args)} files, channel: {channel}).")
     return True
 
 
@@ -290,9 +418,11 @@ def deploy_all(kubectl: str, kubeconfig: str) -> bool:
 # Step 4: Verify all updates are reflected in remote pod
 # ---------------------------------------------------------------------------
 
-def verify_sync(route_url: str, retries: int = 5) -> bool:
+def verify_sync(route_url: str, dev: bool = False,
+                source_dir: pathlib.Path | None = None, retries: int = 5) -> bool:
     """Verify all files match using /checksums after deployment."""
-    print("\n=== Verification ===\n")
+    channel = "dev" if dev else "stable"
+    print(f"\n=== Verification ({channel}) ===\n")
     print("  Checking remote pod reflects all updates...")
     for attempt in range(retries):
         time.sleep(2)
@@ -301,15 +431,15 @@ def verify_sync(route_url: str, retries: int = 5) -> bool:
             print(f"    Attempt {attempt + 1}/{retries}: pod not ready...")
             continue
 
-        changed, missing_remote, _ = compare_all(route_url)
+        changed, missing_remote, _ = compare_all(route_url, dev=dev, source_dir=source_dir)
         if not changed and not missing_remote:
-            print("  VERIFIED: All remote files match local (ETags identical).")
+            print("  VERIFIED: All remote files match (ETags identical).")
             return True
 
         remaining = changed + missing_remote
         print(f"    Attempt {attempt + 1}/{retries}: {len(remaining)} file(s) still differ...")
 
-    print("  ERROR: Verification failed — remote does not match local", file=sys.stderr)
+    print("  ERROR: Verification failed — remote does not match source", file=sys.stderr)
     return False
 
 
@@ -384,6 +514,10 @@ def main() -> int:
                         help="Check sync status only (no changes)")
     parser.add_argument("--force", action="store_true",
                         help="Redeploy even if all files match")
+    parser.add_argument("--dev", action="store_true",
+                        help="Sync dev channel (files stored with dev-- prefix)")
+    parser.add_argument("--github", action="store_true",
+                        help="Fetch stable files from GitHub kosh branch (requires gh auth)")
     parser.add_argument("--url", default=None,
                         help="Override route URL")
     args = parser.parse_args()
@@ -392,8 +526,10 @@ def main() -> int:
     kubectl = find_kubectl()
     route_url = args.url or get_route_url(kubectl, kubeconfig)
 
+    channel = "dev" if args.dev else "stable"
     print(f"  KUBECONFIG: {kubeconfig}")
-    print(f"  Route URL: {route_url}\n")
+    print(f"  Route URL: {route_url}")
+    print(f"  Channel: {channel}\n")
 
     # --- Initial deploy ---
     if args.deploy:
@@ -422,46 +558,67 @@ def main() -> int:
         print(f"\n  DEPLOYED. URL: {route_url}/kagenti-teleport-setup.py")
         return 0
 
-    # --- Step 2: Compare files ---
-    print("\n=== Step 2: Compare Files (HTTP ETag) ===\n")
-    changed, missing_remote, missing_local = compare_all(route_url)
+    # --- Resolve source files ---
+    # Both channels sync from local working tree.
+    # Stable (default): writes files with plain keys (kosh.py)
+    # Dev (--dev): writes files with dev-- prefix (dev--kosh.py)
+    source_dir: pathlib.Path | None = None
+    tmp_dir: pathlib.Path | None = None
 
-    if missing_local:
-        print(f"  Skipping (no local file): {', '.join(missing_local)}")
-    if not changed and not missing_remote:
-        if args.force:
-            print("  All files match, but --force specified.")
-        else:
-            print("  ALL IN SYNC. Nothing to do.")
-            if args.status:
-                print()
-                print_status(route_url)
+    if args.github:
+        # Fetch stable from GitHub kosh branch (requires gh auth)
+        tmp_dir = pathlib.Path(tempfile.mkdtemp(prefix="kts-stable-"))
+        print("\n=== Fetching stable from GitHub ===\n")
+        if not fetch_stable_files(tmp_dir):
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            return 1
+        source_dir = tmp_dir
+
+    try:
+        # --- Step 2: Compare files ---
+        print(f"\n=== Step 2: Compare Files ({channel}, HTTP ETag) ===\n")
+        changed, missing_remote, missing_local = compare_all(
+            route_url, dev=args.dev, source_dir=source_dir
+        )
+
+        if missing_local:
+            print(f"  Skipping (no source file): {', '.join(missing_local)}")
+        if not changed and not missing_remote:
+            if args.force:
+                print("  All files match, but --force specified.")
             else:
-                print(f"  URL: {route_url}/kagenti-teleport-setup.py")
-            return 0
+                print("  ALL IN SYNC. Nothing to do.")
+                if not args.status:
+                    url_path = "/dev/kagenti-teleport-setup.py" if args.dev else "/kagenti-teleport-setup.py"
+                    print(f"  URL: {route_url}{url_path}")
+                return 0
 
-    if changed:
-        print(f"  Changed: {', '.join(changed)}")
-    if missing_remote:
-        print(f"  Missing on remote: {', '.join(missing_remote)}")
+        if changed:
+            print(f"  Changed: {', '.join(changed)}")
+        if missing_remote:
+            print(f"  Missing on remote: {', '.join(missing_remote)}")
 
-    if args.status:
-        print("\n  Run without --status to sync.")
-        return 1
+        if args.status:
+            print("\n  Run without --status to sync.")
+            return 1
 
-    # --- Step 3: Update ---
-    print("\n=== Step 3: Update Remote Pod ===\n")
-    if not update_configmap(kubectl, kubeconfig):
-        return 1
-    if not restart_deployment(kubectl, kubeconfig):
-        return 1
+        # --- Step 3: Update ---
+        print(f"\n=== Step 3: Update Remote Pod ({channel}) ===\n")
+        if not update_configmap(kubectl, kubeconfig, dev=args.dev, source_dir=source_dir):
+            return 1
+        if not restart_deployment(kubectl, kubeconfig):
+            return 1
 
-    # --- Step 4: Verify ---
-    if not verify_sync(route_url):
-        return 1
+        # --- Step 4: Verify ---
+        if not verify_sync(route_url, dev=args.dev, source_dir=source_dir):
+            return 1
 
-    print(f"\n  DONE. URL: {route_url}/kagenti-teleport-setup.py")
-    return 0
+        url_path = "/dev/kagenti-teleport-setup.py" if args.dev else "/kagenti-teleport-setup.py"
+        print(f"\n  DONE. URL: {route_url}{url_path}")
+        return 0
+    finally:
+        if tmp_dir:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":

@@ -5,6 +5,10 @@ HOST_HOME="$HOME"
 
 # Root of all allowed projects
 SANDBOX_DIR="${SANDBOX_DIR:-"$HOME/sandbox"}"
+if [[ ! -d "$SANDBOX_DIR" ]]; then
+  # Fall back to parent of current directory (supports running from any location)
+  SANDBOX_DIR="$(dirname "$(pwd -P)")"
+fi
 
 # Canonical SANDBOX_DIR — use `pwd -P` so the value matches the *physical*
 # path the kernel sandbox sees. macOS sandbox-exec resolves symlinks before
@@ -284,6 +288,10 @@ _filtered_path="$SHIM_DIR:$_filtered_path"
 # Start with env -i so nothing leaks through implicitly.
 
 _env=(
+  # Sandbox detection (lets kosh CLI know we're inside a local sandbox)
+  "KOSH_SANDBOX=1"
+  "KOSH_SANDBOX_DIR=$PROJECT_REAL"
+
   # Identity & home (HOME redirected to project dir)
   "HOME=$PROJECT_REAL"
   "USER=${USER:-}"

@@ -67,17 +67,12 @@ echo "Project directory: $DIR"
 echo "Sandbox name: $SANDBOX_NAME"
 
 # ---------------------------------------------------------------------------
-# Step 3: Create sandbox if it doesn't already exist
+# Step 3: Create sandbox (+ one-time setup) or skip if already exists
 # ---------------------------------------------------------------------------
 
 echo "Checking for existing sandbox '$SANDBOX_NAME'..."
 if run_cmd "$OPENSHELL" sandbox list 2>&1 | grep -qw "$SANDBOX_NAME"; then
   echo "  Sandbox '$SANDBOX_NAME' already exists."
-  # Update policy on existing sandbox to pick up any changes
-  if [[ -f "$POLICY_FILE" ]]; then
-    echo "  Syncing policy..."
-    run_cmd "$OPENSHELL" policy set "$SANDBOX_NAME" --policy "$POLICY_FILE" --wait || true
-  fi
 else
   echo "  Creating sandbox '$SANDBOX_NAME'..."
   if [[ ! -f "$POLICY_FILE" ]]; then
@@ -95,14 +90,74 @@ else
   fi
   run_cmd "$OPENSHELL" sandbox create "${CREATE_ARGS[@]}" --no-tty -- true || true
   echo "  Sandbox '$SANDBOX_NAME' created."
+
+  # Wait for sandbox to reach Ready state before setup
+  echo "  Waiting for sandbox to be ready..."
+  for i in $(seq 1 60); do
+    PHASE=$("$OPENSHELL" sandbox list 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | grep -w "$SANDBOX_NAME" | awk '{print $NF}')
+    if [[ "$PHASE" == "Ready" ]]; then
+      if "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" --no-tty -- true 2>/dev/null; then
+        echo "  Sandbox '$SANDBOX_NAME' is ready."
+        break
+      fi
+    fi
+    if [[ $i -eq 60 ]]; then
+      echo "error: sandbox '$SANDBOX_NAME' did not become ready within 60s (phase: $PHASE)" >&2
+      exit 1
+    fi
+    echo "  Waiting... (phase: $PHASE)"
+    sleep 1
+  done
+
+  # --- One-time .bashrc setup (single batch write) ---
+  echo "  Configuring sandbox environment..."
+  run_cmd "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" -- sh -c "cat >> /sandbox/.bashrc << 'KOSH_BASHRC'
+export PATH=\"\$HOME/.local/bin:\$PATH\"
+export PATH=\"/sandbox/.npm-global/bin:\$PATH\"
+export ANTHROPIC_BASE_URL=\"https://ete-litellm.ai-models.vpc-int.res.ibm.com\"
+export CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1
+export NODE_NO_WARNINGS=1
+export ANTHROPIC_MODEL=\"$MODEL\"
+export HOME=$DIR
+cd \"$DIR\" 2>/dev/null || true
+alias kosh=\"echo \\\"kosh is not available inside the sandbox. To run kosh commands, exit the sandbox (type exit) or use another terminal.\\\"\"
+KOSH_BASHRC"
+
+  # Add cd to .profile so login shells land in the right directory
+  run_cmd "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" -- \
+    sh -c "printf 'cd \"$DIR\" 2>/dev/null || true\n' >> /sandbox/.profile"
+
+  echo "  Environment configured."
+
+  # --- One-time Bob shell install ---
+  echo ""
+  echo "  Installing Bob shell..."
+
+  exec_sb() {
+    "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" --no-tty -- bash -c "$1"
+  }
+
+  BOB_INSTALL_SH="$SCRIPT_DIR/bob-install.sh"
+  if [[ ! -f "$BOB_INSTALL_SH" ]]; then
+    echo "  ERROR: $BOB_INSTALL_SH not found" >&2
+    echo "  Trying official installer as fallback..."
+    exec_sb 'curl -fsSL https://bob.ibm.com/download/bobshell.sh | bash' 2>/dev/null || true
+  else
+    run_cmd "$OPENSHELL" sandbox upload "$SANDBOX_NAME" "$BOB_INSTALL_SH" /tmp/
+    if run_cmd "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" --no-tty -- bash /tmp/bob-install.sh 2>/dev/null; then
+      echo "  Bob installed."
+    else
+      echo "  WARNING: Bob install failed." >&2
+      exec_sb 'curl -fsSL https://bob.ibm.com/download/bobshell.sh | bash' 2>/dev/null || true
+    fi
+  fi
 fi
 
-# Wait for sandbox to reach Ready state
+# Wait for sandbox to reach Ready state (for existing sandboxes that may be restarting)
 echo "Waiting for sandbox '$SANDBOX_NAME' to be ready..."
 for i in $(seq 1 60); do
   PHASE=$("$OPENSHELL" sandbox list 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | grep -w "$SANDBOX_NAME" | awk '{print $NF}')
   if [[ "$PHASE" == "Ready" ]]; then
-    # Confirm exec actually works (list can report Ready before exec is available)
     if "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" --no-tty -- true 2>/dev/null; then
       echo "  Sandbox '$SANDBOX_NAME' is ready."
       break
@@ -121,9 +176,50 @@ done
 # ---------------------------------------------------------------------------
 
 # Remove dangling symlinks that would cause upload to fail with EPERM
-# (common when project was copied from a local macOS sandbox with symlinks
-# pointing outside the workspace, e.g. uv cache links)
 find "$DIR" -type l ! -exec test -e {} \; -delete 2>/dev/null || true
+
+# Ensure .gitignore excludes sensitive files (tokens, certs, config)
+GITIGNORE="$DIR/.gitignore"
+SENSITIVE_PATTERNS=(
+  ".config/"
+  "openshell/"
+  "oidc_token.json"
+  "token.json"
+  "edge_token.json"
+  "rossconfig.json"
+  "*.key"
+  "*.crt"
+  "*.pem"
+)
+_gitignore_changed=0
+for _pat in "${SENSITIVE_PATTERNS[@]}"; do
+  if ! grep -qxF "$_pat" "$GITIGNORE" 2>/dev/null; then
+    echo "$_pat" >> "$GITIGNORE"
+    _gitignore_changed=1
+  fi
+done
+if [[ $_gitignore_changed -eq 1 ]]; then
+  echo "  Updated .gitignore to exclude sensitive files from upload."
+fi
+
+# Warn about sensitive files/dirs that will be skipped
+for _pat in "${SENSITIVE_PATTERNS[@]}"; do
+  if [[ "$_pat" == */ ]]; then
+    _dir="${_pat%/}"
+    if [[ -d "$DIR/$_dir" ]]; then
+      echo "  SKIP (sensitive): $DIR/$_dir/"
+    fi
+  elif [[ "$_pat" == \** ]]; then
+    _found=$(find "$DIR" -maxdepth 1 -name "$_pat" 2>/dev/null | head -5)
+    for _f in $_found; do
+      echo "  SKIP (sensitive): $_f"
+    done
+  else
+    if [[ -f "$DIR/$_pat" ]]; then
+      echo "  SKIP (sensitive): $DIR/$_pat"
+    fi
+  fi
+done
 
 echo "Uploading files from $DIR to sandbox:$DIR ..."
 run_cmd "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" -- mkdir -p "$DIR"
@@ -134,122 +230,8 @@ if [[ -d "$DIR/.claude" ]]; then
 fi
 echo "  Files uploaded."
 
-# ---------------------------------------------------------------------------
-# Step 5: Ensure .bashrc exists with required environment variables
-# ---------------------------------------------------------------------------
-
-SANDBOX_HOME="/sandbox"
-BASHRC="$SANDBOX_HOME/.bashrc"
-
-echo "Ensuring .bashrc has required settings..."
-
-# Create .bashrc if it doesn't exist
-if ! run_cmd "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" -- test -f "$BASHRC" 2>/dev/null; then
-  echo "  Creating $BASHRC..."
-  run_cmd "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" -- \
-    sh -c "touch $BASHRC"
-fi
-
-# Append ANTHROPIC_BASE_URL if missing
-if ! run_cmd "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" -- grep -q "ANTHROPIC_BASE_URL" "$BASHRC" 2>/dev/null; then
-  echo "  Adding ANTHROPIC_BASE_URL..."
-  run_cmd "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" -- \
-    sh -c "printf 'export ANTHROPIC_BASE_URL=\"https://ete-litellm.ai-models.vpc-int.res.ibm.com\"\n' >> $BASHRC"
-fi
-
-# Append CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS if missing
-if ! run_cmd "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" -- grep -q "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS" "$BASHRC" 2>/dev/null; then
-  echo "  Adding CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS..."
-  run_cmd "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" -- \
-    sh -c "printf 'export CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1\n' >> $BASHRC"
-fi
-
-# Suppress Node.js proxy and deprecation warnings from OpenShell's HTTP proxy interception
-if ! run_cmd "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" -- grep -q "NODE_NO_WARNINGS" "$BASHRC" 2>/dev/null; then
-  echo "  Adding NODE_NO_WARNINGS..."
-  run_cmd "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" -- \
-    sh -c "printf 'export NODE_NO_WARNINGS=1\n' >> $BASHRC"
-fi
-
-# Append ANTHROPIC_MODEL if missing
-if ! run_cmd "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" -- grep -q "ANTHROPIC_MODEL" "$BASHRC" 2>/dev/null; then
-  echo "  Adding ANTHROPIC_MODEL=$MODEL..."
-  run_cmd "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" -- \
-    sh -c "printf 'export ANTHROPIC_MODEL=\"$MODEL\"\n' >> $BASHRC"
-fi
-
-# Append export HOME=<uploaded dir> if missing
-if ! run_cmd "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" -- grep -q "export HOME=$DIR" "$BASHRC" 2>/dev/null; then
-  echo "  Adding export HOME=$DIR..."
-  run_cmd "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" -- \
-    sh -c "printf 'export HOME=$DIR\n' >> $BASHRC"
-fi
-
-# Append cd \$HOME if missing
-if ! run_cmd "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" -- grep -q 'cd \$HOME' "$BASHRC" 2>/dev/null; then
-  echo "  Adding cd \$HOME..."
-  run_cmd "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" -- \
-    sh -c "printf 'cd \$HOME\n' >> $BASHRC"
-fi
-
-# BOBSHELL_API_KEY is injected via openshell provider credential (same as ANTHROPIC_AUTH_TOKEN)
-# No plain-text export needed — openshell resolves it securely at runtime
-
-echo "Verifying .bashrc..."
-run_cmd "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" -- cat "$BASHRC"
-
-# ---------------------------------------------------------------------------
-# Step 6: Install Bob shell
-# ---------------------------------------------------------------------------
-
 echo ""
-echo "Installing Bob shell..."
-
-exec_sb() {
-  "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" --no-tty -- bash -c "$1"
-}
-
-if exec_sb 'export PATH="/sandbox/.npm-global/bin:$PATH" && command -v bob >/dev/null 2>&1' 2>/dev/null; then
-  BOB_VERSION=$(exec_sb 'export PATH="/sandbox/.npm-global/bin:$PATH" && bob --version 2>/dev/null | tail -1 | tr -d "[:space:]"' 2>/dev/null || echo "unknown")
-  echo "  Bob already installed (version: $BOB_VERSION)."
-else
-  echo "  Installing Bob (manual tarball method)..."
-
-  # Ensure .npm-global/bin is on PATH in .bashrc
-  if ! exec_sb 'grep -q ".npm-global/bin" /sandbox/.bashrc' 2>/dev/null; then
-    exec_sb 'echo "export PATH=\"/sandbox/.npm-global/bin:\$PATH\"" >> /sandbox/.bashrc'
-  fi
-
-  # The OpenShell proxy blocks npm metadata requests for scoped packages
-  # (URLs with %2f are reset despite allow_encoded_slash: true).
-  # Workaround: upload bob-install.sh which downloads tarballs directly
-  # using literal slashes (which the proxy allows).
-  BOB_INSTALL_SH="$SCRIPT_DIR/bob-install.sh"
-  if [[ ! -f "$BOB_INSTALL_SH" ]]; then
-    echo "  ERROR: $BOB_INSTALL_SH not found" >&2
-    echo "  Trying official installer as fallback..."
-    exec_sb 'curl -fsSL https://bob.ibm.com/download/bobshell.sh | bash' 2>/dev/null || true
-  else
-    run_cmd "$OPENSHELL" sandbox upload "$SANDBOX_NAME" "$BOB_INSTALL_SH" /tmp/
-    if run_cmd "$OPENSHELL" sandbox exec --name "$SANDBOX_NAME" --no-tty -- bash /tmp/bob-install.sh 2>/dev/null; then
-      echo "  Bob tarball install completed."
-    else
-      echo "  WARNING: Bob tarball install failed." >&2
-      echo "  Trying official installer as fallback..."
-      exec_sb 'curl -fsSL https://bob.ibm.com/download/bobshell.sh | bash' 2>/dev/null || true
-    fi
-  fi
-
-  # Verify
-  if exec_sb 'export PATH="/sandbox/.npm-global/bin:$PATH" && command -v bob >/dev/null 2>&1' 2>/dev/null; then
-    BOB_VERSION=$(exec_sb 'export PATH="/sandbox/.npm-global/bin:$PATH" && bob --version 2>/dev/null | tail -1 | tr -d "[:space:]"' 2>/dev/null || echo "unknown")
-    echo "  Bob installed successfully (version: $BOB_VERSION)."
-  else
-    echo "  WARNING: Bob not found after install. Run manually inside sandbox:" >&2
-    echo "    npm install -g https://s3.us-south.cloud-object-storage.appdomain.cloud/bob-shell/bobshell-1.0.4.tgz" >&2
-  fi
-fi
-
+echo "Done. Sandbox '$SANDBOX_NAME' is ready."
 echo ""
-echo "Done. Connecting to sandbox '$SANDBOX_NAME'..."
-exec "$OPENSHELL" sandbox connect "$SANDBOX_NAME"
+echo "To connect:"
+echo "  kosh sandbox connect $SANDBOX_NAME"

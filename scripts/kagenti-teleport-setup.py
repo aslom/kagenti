@@ -165,7 +165,8 @@ def _versioned_filename(filename: str) -> str:
     return f"{stem}-{stamp}{suffix}"
 
 
-def download_source_files(dest_dir: pathlib.Path, server_url: str) -> bool:
+def download_source_files(dest_dir: pathlib.Path, server_url: str,
+                          channel: str = "stable") -> bool:
     """Download kosh support files from the remote server.
 
     Tracks file hashes in rossconfig.json. If a local file was modified
@@ -178,6 +179,12 @@ def download_source_files(dest_dir: pathlib.Path, server_url: str) -> bool:
     ctx.verify_mode = ssl.CERT_NONE
 
     rossconfig = _load_rossconfig(dest_dir)
+
+    # Warn if switching channels
+    existing_channel = rossconfig.get("channel", "stable")
+    if existing_channel != channel:
+        print(f"  WARNING: Switching from '{existing_channel}' to '{channel}' channel.")
+
     files_info = rossconfig.get("files", {})
 
     downloaded = 0
@@ -222,6 +229,7 @@ def download_source_files(dest_dir: pathlib.Path, server_url: str) -> bool:
         }
         downloaded += 1
 
+    rossconfig["channel"] = channel
     rossconfig["files"] = files_info
     rossconfig["last_updated"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
     rossconfig["server_url"] = server_url
@@ -661,6 +669,37 @@ def _oidc_login_ropc(oidc_issuer: str, username: str, password: str,
 # Tests
 # ---------------------------------------------------------------------------
 
+def persist_kosh_alias(install_dir: pathlib.Path) -> None:
+    """Append kosh alias to ~/.zshrc and ~/.bashrc if not already present."""
+    alias_line = f'alias kosh="uv run {install_dir}/kosh.py"'
+    marker = "alias kosh="
+
+    for rc_name in (".zshrc", ".bashrc"):
+        rc_path = pathlib.Path.home() / rc_name
+        if not rc_path.exists():
+            continue
+        existing = rc_path.read_text()
+        if marker in existing:
+            if alias_line in existing:
+                print(f"  {rc_name}: kosh alias already present (correct)")
+            else:
+                for line in existing.splitlines():
+                    if line.strip().startswith(marker):
+                        print(f"  {rc_name}: WARNING: existing kosh alias points elsewhere:")
+                        print(f"    found:    {line.strip()}")
+                        print(f"    expected: {alias_line}")
+                        break
+            continue
+        with rc_path.open("a") as f:
+            f.write(f"\n# Added by kagenti-teleport-setup\n{alias_line}\n")
+        print(f"  {rc_name}: added kosh alias")
+
+    print(f"\n  To activate now, run one of:")
+    print(f"    source ~/.zshrc    # if using zsh")
+    print(f"    source ~/.bashrc   # if using bash")
+    print(f"  Or simply open a new terminal window.")
+
+
 def run_test(uv_path: str, install_dir: pathlib.Path) -> None:
     """Run kosh gateway login and sandbox list as integration tests."""
     kosh_py = install_dir / "kosh.py"
@@ -785,6 +824,11 @@ Examples:
         action="store_true",
         help="Only verify existing installation",
     )
+    parser.add_argument(
+        "--dev",
+        action="store_true",
+        help="Install development channel (from /dev/ on server)",
+    )
     args = parser.parse_args()
 
     print("=== kagenti-teleport-setup ===\n")
@@ -822,6 +866,46 @@ Examples:
     ).stdout.strip()
     print(f"  Found: {uv_path} ({uv_version})")
 
+    # Check Python 3.12+ is available (required by openshell)
+    print("\nChecking for Python 3.12+...")
+    py_check = subprocess.run(
+        [uv_path, "python", "find", ">=3.12"],
+        capture_output=True, text=True,
+    )
+    if py_check.returncode != 0:
+        print("  Python 3.12+ not found. Installing via uv...")
+        install_result = subprocess.run(
+            [uv_path, "python", "install", "3.12"],
+            capture_output=True, text=True,
+        )
+        if install_result.returncode != 0:
+            print(
+                "\nERROR: Python 3.12+ is required (openshell dependency) "
+                "and automatic install failed.\n\n"
+                "Install manually with:\n"
+                "  uv python install 3.12\n\n"
+                "Or set UV_PYTHON=3.12 if you have it installed elsewhere.",
+                file=sys.stderr,
+            )
+            if install_result.stderr:
+                print(f"  {install_result.stderr.strip()}", file=sys.stderr)
+            sys.exit(1)
+        print(f"  Installed: {install_result.stdout.strip()}")
+        # Re-check after install
+        py_check = subprocess.run(
+            [uv_path, "python", "find", ">=3.12"],
+            capture_output=True, text=True,
+        )
+    print(f"  Found: {py_check.stdout.strip()}")
+
+    uv_python_env = os.environ.get("UV_PYTHON", "")
+    if uv_python_env and "3.11" in uv_python_env:
+        print(
+            f"\n  WARNING: UV_PYTHON is set to '{uv_python_env}' which may be <3.12.\n"
+            f"  Consider: export UV_PYTHON=3.12",
+            file=sys.stderr,
+        )
+
     # Step 2: Determine install directory
     install_dir = get_install_dir(args.install_dir)
     print(f"\nInstall directory: {install_dir}")
@@ -844,9 +928,12 @@ Examples:
         if not (source_dir / "kosh.py").exists():
             # Running from remote URL or source files not available — download to CWD
             server_url = os.environ.get("KAGENTI_SETUP_SERVER_URL", DEFAULT_SERVER_URL)
+            if args.dev:
+                server_url = server_url.rstrip("/") + "/dev"
             source_dir = pathlib.Path.cwd()
-            print(f"  kosh.py not found locally, downloading from {server_url} to {source_dir}...")
-            if not download_source_files(source_dir, server_url):
+            channel = "dev" if args.dev else "stable"
+            print(f"  kosh.py not found locally, downloading from {server_url} ({channel}) to {source_dir}...")
+            if not download_source_files(source_dir, server_url, channel=channel):
                 print("\nERROR: Could not download support files.", file=sys.stderr)
                 print("Use --source-dir to point to the directory containing kosh.py", file=sys.stderr)
                 sys.exit(1)
@@ -907,7 +994,16 @@ Examples:
             print("  Skipping login (no credentials provided).")
             print("  To login, provide --user and --password, or set KOSH_USER/KOSH_PASSWORD env vars.")
 
-    # Step 7: Summary
+    # Step 7: Persist alias
+    print("\n=== Shell Alias ===")
+    print(f"\n  kosh is a CLI that builds on openshell by adding local sandboxing,")
+    print(f"  project teleport (sync + upload), domain allowlisting, and agent deployment.")
+    print(f"\n  NOTE: kosh is a shell alias, not a standalone binary.")
+    print(f"  There is no 'kosh' executable — it runs via: uv run {install_dir}/kosh.py")
+    print(f"  The alias below has been added to your shell rc files:\n")
+    persist_kosh_alias(install_dir)
+
+    # Step 8: Summary
     print("\n=== Setup Complete ===")
     print(f'\n  alias kosh="uv run {install_dir}/kosh.py"')
     print(f"\n  Gateway: {gateway_name} -> {gateway_url}")
@@ -920,7 +1016,7 @@ Examples:
     token_file = get_openshell_config_dir() / "gateways" / gateway_name / "oidc_token.json"
     print(f"  Token: {'OK' if token_file.exists() else 'NOT LOGGED IN'}")
 
-    # Step 8: Run tests if requested
+    # Step 9: Run tests if requested
     if args.test:
         print("\n=== Running Test: kosh sandbox list ===")
         run_test(uv_path, install_dir)

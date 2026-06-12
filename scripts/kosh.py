@@ -1,6 +1,6 @@
- #!/usr/bin/env -S uv run --with openshell==0.0.59 --with click
+#!/usr/bin/env -S uv run --with openshell==0.0.59 --with click
 # /// script
-# requires-python = ">=3.11"
+# requires-python = ">=3.12"
 # dependencies = [
 #     "openshell==0.0.59",
 #     "click>=8.0",
@@ -29,6 +29,10 @@ import sys
 
 import click
 
+_NOISE_PATTERNS = (
+    "DEBUG openshell_sandbox::sandbox::linux::seccomp",
+)
+
 
 def _run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
     cwd = kwargs.get("cwd")
@@ -44,7 +48,16 @@ def _run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
     click.echo(f"+ {' '.join(parts)}", err=True)
     kwargs.setdefault("stdin", sys.stdin)
     kwargs.setdefault("stdout", sys.stdout)
-    kwargs.setdefault("stderr", sys.stderr)
+    if "stderr" not in kwargs:
+        proc = subprocess.Popen(cmd, stdin=kwargs.pop("stdin", sys.stdin),
+                                stdout=kwargs.pop("stdout", sys.stdout),
+                                stderr=subprocess.PIPE, text=True, **kwargs)
+        for line in proc.stderr:
+            if any(pat in line for pat in _NOISE_PATTERNS):
+                continue
+            sys.stderr.write(line)
+        proc.wait()
+        return subprocess.CompletedProcess(cmd, proc.returncode)
     return subprocess.run(cmd, **kwargs)
 
 
@@ -58,6 +71,19 @@ def _find_openshell() -> str:
     click.echo("error: 'openshell' CLI not found in PATH", err=True)
     click.echo("Install it with: uv tool install -U openshell", err=True)
     sys.exit(1)
+
+
+def _in_local_sandbox() -> bool:
+    """Return True if running inside a kosh local sandbox."""
+    return os.environ.get("KOSH_SANDBOX") == "1"
+
+
+def _check_not_in_sandbox(cmd_name: str) -> None:
+    """Exit with helpful message if running inside a local sandbox."""
+    if _in_local_sandbox():
+        click.echo(f"error: 'kosh {cmd_name}' cannot run inside a sandbox.", err=True)
+        click.echo("  Exit the sandbox first (type 'exit'), then run from the host shell.", err=True)
+        sys.exit(1)
 
 
 OPENSHELL_PASSTHROUGH = [
@@ -99,18 +125,21 @@ class KoshGroup(click.Group):
         formatter.write("Kagenti OpenShell CLI — all openshell commands plus kagenti extras.\n")
 
 
-_NOISE_PATTERNS = (
-    "DEBUG openshell_sandbox::sandbox::linux::seccomp",
-)
-
 
 def _make_passthrough(name: str) -> click.Command:
-    @click.command(name, context_settings={"ignore_unknown_options": True, "allow_extra_args": True})
-    @click.pass_context
-    def proxy(ctx: click.Context) -> None:
+    @click.command(
+        name,
+        context_settings={
+            "ignore_unknown_options": True,
+            "allow_extra_args": True,
+            "allow_interspersed_args": False,
+            "help_option_names": [],
+        },
+    )
+    @click.argument("args", nargs=-1, type=click.UNPROCESSED)
+    def proxy(args: tuple[str, ...]) -> None:
         openshell = _find_openshell()
-        cmd = [openshell, name, *ctx.args]
-        cwd = None
+        cmd = [openshell, name, *args]
         click.echo(f"+ {shlex.join(cmd)}", err=True)
         proc = subprocess.Popen(
             cmd, stdin=sys.stdin, stdout=sys.stdout,
@@ -126,7 +155,35 @@ def _make_passthrough(name: str) -> click.Command:
     return proxy
 
 
-@click.group(cls=KoshGroup)
+CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
+
+
+def _bold(text: str) -> str:
+    """Wrap text in ANSI bold if stdout is a terminal."""
+    if sys.stdout.isatty():
+        return f"\033[1m{text}\033[0m"
+    return text
+
+
+class BoldHelpFormatter(click.HelpFormatter):
+    """Click help formatter that bolds section headers, commands, and options like openshell."""
+
+    def write_heading(self, heading: str) -> None:
+        label = "FLAGS" if heading.lower() == "options" else heading.upper()
+        self.write(f"\n{_bold(label)}\n")
+
+    def write_usage(self, prog: str, args: str = "", prefix: str | None = None) -> None:
+        self.write(f"{_bold('USAGE')}\n  {_bold(prog)} {args}\n")
+
+    def write_dl(self, rows: list[tuple[str, str]], col_max: int = 30, col_spacing: int = 2) -> None:
+        rows = [(_bold(term), help_text) for term, help_text in rows]
+        super().write_dl(rows, col_max=col_max, col_spacing=col_spacing)
+
+
+click.core.Context.formatter_class = BoldHelpFormatter
+
+
+@click.group(cls=KoshGroup, context_settings=CONTEXT_SETTINGS)
 @click.version_option(version="0.1.0", prog_name="kosh")
 def cli() -> None:
     """kosh - Kagenti OpenShell CLI."""
@@ -255,6 +312,13 @@ def teleport(directory: str | None, openshell_bin: str | None, xdg_config_home: 
     if not TELEPORT_SH.exists():
         click.echo(f"error: teleport.sh not found at {TELEPORT_SH}", err=True)
         sys.exit(1)
+
+    # Inside a local sandbox: can only teleport the current sandbox directory
+    if _in_local_sandbox():
+        sandbox_dir_env = os.environ.get("KOSH_SANDBOX_DIR", "")
+        if sandbox_dir_env:
+            click.echo("Inside sandbox — teleporting current project only.")
+            directory = sandbox_dir_env
 
     if directory:
         dir_path = pathlib.Path(directory).resolve()
@@ -443,7 +507,8 @@ def _run_sandbox_sh(sandbox_dir: pathlib.Path) -> None:
     if not SANDBOX_SH.exists():
         click.echo(f"error: sandbox.sh not found at {SANDBOX_SH}", err=True)
         sys.exit(1)
-    result = _run(["bash", str(SANDBOX_SH), "zsh"], cwd=str(sandbox_dir))
+    env = {**os.environ, "SANDBOX_DIR": str(sandbox_dir.parent)}
+    result = _run(["bash", str(SANDBOX_SH), "zsh"], cwd=str(sandbox_dir), env=env)
     sys.exit(result.returncode)
 
 
@@ -452,7 +517,7 @@ def _run_sandbox_sh(sandbox_dir: pathlib.Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-@cli.group()
+@cli.group(context_settings=CONTEXT_SETTINGS)
 def allow() -> None:
     """Manage domain allowlists for OpenShell sandboxes."""
 
@@ -698,7 +763,7 @@ def allow_denied(sandbox: str | None, since: str, do_apply: bool, as_json: bool)
 # --- kosh allow profile ---
 
 
-@allow.group()
+@allow.group(context_settings=CONTEXT_SETTINGS)
 def profile() -> None:
     """Manage reusable domain profiles."""
 
@@ -835,26 +900,39 @@ def profile_delete(name: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-@cli.group("local-sandbox")
+class OrderedGroup(click.Group):
+    """Click group that preserves command registration order."""
+
+    def list_commands(self, ctx: click.Context) -> list[str]:
+        return list(self.commands)
+
+
+@cli.group("local-sandbox", cls=OrderedGroup, context_settings=CONTEXT_SETTINGS)
 def local_sandbox() -> None:
-    """Manage local macOS sandboxed environments."""
+    """Manage local sandboxed environments.
+
+\b
+EXAMPLES
+  $ kosh local-sandbox create my-project
+  $ kosh local-sandbox connect my-project
+  $ kosh local-sandbox list
+  $ kosh local-sandbox delete my-project"""
 
 
 
 @local_sandbox.command()
-@click.option("--name", required=True, help="Name for the local sandbox (used as directory name).")
+@click.argument("name", default=None, required=False)
+@click.option("--name", "name_opt", default=None, hidden=True, help="[Deprecated] Use positional argument instead.")
 @click.option("--model", default=DEFAULT_MODEL, show_default=True, help="Claude model to set as ANTHROPIC_MODEL.")
-def create(name: str, model: str) -> None:
-    """Create a local sandbox directory and launch a sandboxed shell.
+def create(name: str | None, name_opt: str | None, model: str) -> None:
+    """Create a sandbox."""
+    _check_not_in_sandbox("local-sandbox create")
+    name = name or name_opt
+    if not name:
+        click.echo("error: sandbox name is required.", err=True)
+        click.echo("Usage: kosh local-sandbox create NAME", err=True)
+        sys.exit(1)
 
-    Creates the directory in the current working directory if it doesn't
-    exist, registers it (with full path) in kosh metadata, and starts
-    sandbox.sh zsh inside it.
-
-    Examples:
-
-        kosh local-sandbox create --name my-project
-    """
     if not os.environ.get("ANTHROPIC_AUTH_TOKEN"):
         click.echo("error: ANTHROPIC_AUTH_TOKEN is not set.", err=True)
         click.echo("Export it before running this command:", err=True)
@@ -869,13 +947,22 @@ def create(name: str, model: str) -> None:
     else:
         click.echo(f"Directory {sandbox_dir} already exists.")
 
-    rc_lines = [
+    common_lines = [
+        'export PATH="$HOME/.local/bin:$PATH"',
+        "alias kosh='echo \"kosh is not available inside the sandbox. To run kosh commands, exit the sandbox (type exit) or use another terminal.\"'",
         'export ANTHROPIC_BASE_URL="https://ete-litellm.ai-models.vpc-int.res.ibm.com"',
         "export CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1",
         f'export ANTHROPIC_MODEL="{model}"',
     ]
-    rc_content = "\n".join(rc_lines) + "\n"
-    for rc_name in (".bashrc", ".zshrc"):
+    bash_ps1 = f'export PS1="\\[\\033[36m\\][kosh:{name}]\\[\\033[0m\\] \\w\\$ "'
+    zsh_ps1 = f"export PS1='%F{{cyan}}[kosh:{name}]%f %~%# '"
+
+    rc_configs = {
+        ".bashrc": common_lines + [bash_ps1],
+        ".zshrc": common_lines + [zsh_ps1],
+    }
+    for rc_name, rc_lines in rc_configs.items():
+        rc_content = "\n".join(rc_lines) + "\n"
         rc_path = sandbox_dir / rc_name
         if not rc_path.exists():
             rc_path.write_text(rc_content)
@@ -892,6 +979,13 @@ def create(name: str, model: str) -> None:
                 elif "ANTHROPIC_MODEL" in key and f'"{model}"' not in existing:
                     new_text = "\n".join(
                         (line if l.startswith("export ANTHROPIC_MODEL=") else l)
+                        for l in existing.splitlines()
+                    ) + "\n"
+                    rc_path.write_text(new_text)
+                    added = True
+                elif "PS1" in key and line not in existing:
+                    new_text = "\n".join(
+                        (line if l.strip().startswith("export PS1=") else l)
                         for l in existing.splitlines()
                     ) + "\n"
                     rc_path.write_text(new_text)
@@ -918,18 +1012,12 @@ def create(name: str, model: str) -> None:
 
 
 @local_sandbox.command()
-@click.option("--name", default=None, help="Name of the local sandbox to connect to (defaults to last used).")
-def connect(name: str | None) -> None:
-    """Connect to an existing local sandbox.
-
-    If --name is omitted, reconnects to the last sandbox used. Launches
-    sandbox.sh zsh in the sandbox directory.
-
-    Examples:
-
-        kosh local-sandbox connect
-        kosh local-sandbox connect --name my-project
-    """
+@click.argument("name", default=None, required=False)
+@click.option("--name", "name_opt", default=None, hidden=True, help="[Deprecated] Use positional argument instead.")
+def connect(name: str | None, name_opt: str | None) -> None:
+    """Connect to a sandbox."""
+    _check_not_in_sandbox("local-sandbox connect")
+    name = name or name_opt
     config_dir = _kosh_config_dir()
 
     if name:
@@ -959,12 +1047,7 @@ def connect(name: str | None) -> None:
 
 @local_sandbox.command("list")
 def list_sandboxes() -> None:
-    """List all registered local sandboxes.
-
-    Examples:
-
-        kosh local-sandbox list
-    """
+    """List sandboxes."""
     config_dir = _kosh_config_dir()
     metadata = _read_metadata(config_dir)
     sandboxes = metadata.get("sandboxes", {})
@@ -989,14 +1072,15 @@ def list_sandboxes() -> None:
 
 
 @local_sandbox.command()
-@click.option("--name", required=True, help="Name of the local sandbox to delete.")
-def delete(name: str) -> None:
-    """Delete a local sandbox directory and remove it from metadata.
-
-    Examples:
-
-        kosh local-sandbox delete --name my-project
-    """
+@click.argument("name", default=None, required=False)
+@click.option("--name", "name_opt", default=None, hidden=True, help="[Deprecated] Use positional argument instead.")
+def delete(name: str | None, name_opt: str | None) -> None:
+    """Delete a sandbox by name."""
+    name = name or name_opt
+    if not name:
+        click.echo("error: sandbox name is required.", err=True)
+        click.echo("Usage: kosh local-sandbox delete NAME", err=True)
+        sys.exit(1)
     config_dir = _kosh_config_dir()
     metadata = _read_metadata(config_dir)
     entry = metadata.get("sandboxes", {}).get(name)
@@ -1343,7 +1427,7 @@ def kagenti_login(kagenti_url, keycloak_url, user, password, realm, client_id):
 
 # --- kosh deploy ---
 
-@cli.group("deploy")
+@cli.group("deploy", context_settings=CONTEXT_SETTINGS)
 def deploy():
     """Deploy agents and tools via Kagenti API (no kubectl needed)."""
 
@@ -1428,7 +1512,7 @@ def deploy_tool(name, namespace, image, protocol, framework, port, target_port, 
 
 # --- kosh catalog ---
 
-@cli.group("catalog")
+@cli.group("catalog", context_settings=CONTEXT_SETTINGS)
 def catalog():
     """List agents and tools from Kagenti API."""
 
@@ -1473,7 +1557,7 @@ def catalog_tools(namespace):
 
 # --- kosh undeploy ---
 
-@cli.group("undeploy")
+@cli.group("undeploy", context_settings=CONTEXT_SETTINGS)
 def undeploy():
     """Remove deployed agents/tools via Kagenti API."""
 
