@@ -18,6 +18,7 @@ Usage:
 """
 from __future__ import annotations
 
+import fnmatch
 import json
 import os
 import pathlib
@@ -26,6 +27,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import time
 
 import click
 
@@ -138,6 +140,7 @@ def _make_passthrough(name: str) -> click.Command:
     )
     @click.argument("args", nargs=-1, type=click.UNPROCESSED)
     def proxy(args: tuple[str, ...]) -> None:
+        _check_not_in_sandbox(name)
         openshell = _find_openshell()
         cmd = [openshell, name, *args]
         click.echo(f"+ {shlex.join(cmd)}", err=True)
@@ -190,7 +193,8 @@ def cli() -> None:
 
 
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
-DEFAULT_MODEL = "claude-opus-4-6"
+DEFAULT_MODEL = os.environ.get("KOSH_MODEL", "claude-opus-4-6")
+LITELLM_BASE_URL = "https://ete-litellm.ai-models.vpc-int.res.ibm.com"
 WORKSPACE_ROOT = SCRIPT_DIR.parent.parent
 
 DEFAULT_BINARIES = [
@@ -283,7 +287,9 @@ def completions(shell: str) -> None:
 
 
 @cli.command()
-@click.option("--directory", "-d", default=None, help="Project directory to teleport (defaults to last local sandbox).")
+@click.argument("name", default=None, required=False)
+@click.option("--directory", "-d", default=None, hidden=True, help="[Deprecated] Use positional argument instead.")
+@click.option("--watch", "-w", is_flag=True, default=False, help="After initial upload, watch for file changes and sync continuously.")
 @click.option("--openshell-bin", default=None, help="Path to openshell binary.")
 @click.option("--xdg-config-home", default=None, help="Override XDG_CONFIG_HOME for gateway config.")
 @click.option("--connect/--no-connect", default=False, help="Connect to the sandbox after setup.")
@@ -291,50 +297,45 @@ def completions(shell: str) -> None:
 @click.option("--model", default=DEFAULT_MODEL, show_default=True, help="Claude model to set as ANTHROPIC_MODEL.")
 @click.option("--allow-profile", multiple=True, help="Apply domain profile after teleport (repeatable).")
 @click.option("--reapply-allowlist/--no-reapply-allowlist", default=True, help="Reapply saved allowlists from config.")
-def teleport(directory: str | None, openshell_bin: str | None, xdg_config_home: str | None, connect: bool, custom_image: bool, model: str, allow_profile: tuple[str, ...], reapply_allowlist: bool) -> None:
+def teleport(name: str | None, directory: str | None, watch: bool, openshell_bin: str | None, xdg_config_home: str | None, connect: bool, custom_image: bool, model: str, allow_profile: tuple[str, ...], reapply_allowlist: bool) -> None:
     """Set up and sync a project into an OpenShell sandbox.
 
     Creates the litellm provider if needed, creates a sandbox named after the
     project directory, uploads local files, and configures .bashrc inside the
-    sandbox. Delegates to teleport.sh.
+    sandbox.
 
-    If no --directory is specified, uses the last local sandbox from kosh
-    config. The directory basename is used as the openshell sandbox name.
+    If no NAME is specified, uses the last local sandbox from kosh config.
+    NAME can be a sandbox name, a directory path, or '.' for current directory.
+
+    Use --watch (-w) to keep syncing file changes after the initial upload.
 
     Examples:
 
     \b
         kosh teleport
-        kosh teleport -d ~/projects/my-app
-        kosh teleport --connect
-        kosh teleport -d . --allow-profile dev-tools --allow-profile web-search
+        kosh teleport my-project
+        kosh teleport .
+        kosh teleport my-project --connect
+        kosh teleport my-project -w
     """
-    if not TELEPORT_SH.exists():
-        click.echo(f"error: teleport.sh not found at {TELEPORT_SH}", err=True)
-        sys.exit(1)
+    _check_not_in_sandbox("teleport")
 
-    # Inside a local sandbox: can only teleport the current sandbox directory
-    if _in_local_sandbox():
-        sandbox_dir_env = os.environ.get("KOSH_SANDBOX_DIR", "")
-        if sandbox_dir_env:
-            click.echo("Inside sandbox — teleporting current project only.")
-            directory = sandbox_dir_env
+    # Merge positional NAME and deprecated --directory/-d
+    target = name or directory
 
-    if directory:
-        dir_path = pathlib.Path(directory).resolve()
+    if target:
+        dir_path = pathlib.Path(target).resolve()
         if not dir_path.is_dir():
-            # Try as a subdirectory of CWD
-            dir_path = (pathlib.Path.cwd() / directory).resolve()
+            dir_path = (pathlib.Path.cwd() / target).resolve()
         if not dir_path.is_dir():
-            # Try as a registered sandbox name
             config_dir = _kosh_config_dir()
             metadata = _read_metadata(config_dir)
-            sb_info = metadata.get("sandboxes", {}).get(directory, {})
+            sb_info = metadata.get("sandboxes", {}).get(target, {})
             sb_path = sb_info.get("path")
             if sb_path and pathlib.Path(sb_path).is_dir():
                 dir_path = pathlib.Path(sb_path)
         if not dir_path.is_dir():
-            click.echo(f"error: directory '{directory}' not found.", err=True)
+            click.echo(f"error: '{target}' not found as directory or sandbox name.", err=True)
             sys.exit(1)
         cwd = str(dir_path)
     else:
@@ -344,26 +345,16 @@ def teleport(directory: str | None, openshell_bin: str | None, xdg_config_home: 
             cwd = last
             click.echo(f"Using last local sandbox: {cwd}")
         else:
-            click.echo("error: no --directory specified and no last local sandbox found.", err=True)
-            click.echo("Create one first: kosh local-sandbox create --name <name>", err=True)
+            click.echo("error: no sandbox specified and no last local sandbox found.", err=True)
+            click.echo("Usage: kosh teleport NAME", err=True)
             sys.exit(1)
 
     cwd_path = pathlib.Path(cwd).resolve()
     sandbox_name = cwd_path.name
-
-    env = os.environ.copy()
-    env["OPENSHELL_BIN"] = openshell_bin or _find_openshell()
-    if xdg_config_home:
-        env["XDG_CONFIG_HOME"] = xdg_config_home
-    if custom_image:
-        env["KOSH_CUSTOM_IMAGE"] = "1"
-    if model != DEFAULT_MODEL:
-        env["KOSH_MODEL"] = model
+    osbin = openshell_bin or _find_openshell()
 
     click.echo(f"Teleporting '{sandbox_name}' from {cwd_path}")
-    result = _run(["bash", str(TELEPORT_SH)], cwd=str(cwd_path), env=env)
-    if result.returncode != 0:
-        sys.exit(result.returncode)
+    _teleport_impl(sandbox_name, cwd_path, osbin, model, custom_image)
 
     # Apply domain allowlist profiles after successful teleport
     config_dir = _kosh_config_dir()
@@ -397,9 +388,10 @@ def teleport(directory: str | None, openshell_bin: str | None, xdg_config_home: 
         if endpoints:
             _apply_endpoints(sandbox_name, endpoints)
 
-    if connect:
-        openshell = openshell_bin or shutil.which("openshell") or os.path.expanduser("~/.local/bin/openshell")
-        result = _run([openshell, "sandbox", "connect", sandbox_name], cwd=str(cwd_path), env=env)
+    if watch:
+        _watch_and_sync(sandbox_name, cwd_path, osbin)
+    elif connect:
+        result = _run([osbin, "sandbox", "connect", sandbox_name], cwd=str(cwd_path))
         sys.exit(result.returncode)
 
 
@@ -417,8 +409,388 @@ def _find_support_file(name: str) -> pathlib.Path:
     return candidate
 
 
-TELEPORT_SH = _find_support_file("teleport.sh")
 SANDBOX_SH = _find_support_file("sandbox.sh")
+
+_SENSITIVE_PATTERNS = [
+    ".config/", "openshell/", "oidc_token.json", "token.json",
+    "edge_token.json", "rossconfig.json", "*.key", "*.crt", "*.pem",
+]
+
+
+def _is_sensitive(rel_path: str) -> bool:
+    """Check if a relative path matches sensitive patterns."""
+    parts = pathlib.PurePosixPath(rel_path).parts
+    for pat in _SENSITIVE_PATTERNS:
+        if pat.endswith("/"):
+            if parts[0] == pat.rstrip("/"):
+                return True
+        elif "*" in pat:
+            if fnmatch.fnmatch(parts[-1], pat):
+                return True
+        else:
+            if rel_path == pat or parts[-1] == pat:
+                return True
+    return False
+
+
+def _is_gitignored(path: pathlib.Path, repo_root: pathlib.Path) -> bool:
+    """Check if a file is gitignored (using git check-ignore)."""
+    try:
+        result = subprocess.run(
+            ["git", "check-ignore", "-q", str(path)],
+            cwd=str(repo_root), capture_output=True, timeout=5,
+        )
+        return result.returncode == 0
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Teleport helpers
+# ---------------------------------------------------------------------------
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _openshell_exec(openshell: str, args: list[str], quiet: bool = False,
+                    capture: bool = False) -> subprocess.CompletedProcess:
+    """Run openshell with args, filtering seccomp noise from stderr."""
+    cmd = [openshell, *args]
+    if not quiet:
+        click.echo(f"+ {shlex.join(cmd)}", err=True)
+    if capture:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        stdout, stderr = proc.communicate()
+        filtered_err = "\n".join(
+            l for l in stderr.splitlines() if not any(p in l for p in _NOISE_PATTERNS)
+        )
+        if filtered_err and not quiet:
+            sys.stderr.write(filtered_err + "\n")
+        return subprocess.CompletedProcess(cmd, proc.returncode, stdout=stdout, stderr=filtered_err)
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    for line in proc.stdout:
+        if any(p in line for p in _NOISE_PATTERNS):
+            continue
+        sys.stdout.write(line)
+    for line in proc.stderr:
+        if any(p in line for p in _NOISE_PATTERNS):
+            continue
+        sys.stderr.write(line)
+    proc.wait()
+    return subprocess.CompletedProcess(cmd, proc.returncode)
+
+
+def _openshell_pipe_stdin(openshell: str, args: list[str], stdin_text: str,
+                          quiet: bool = False) -> subprocess.CompletedProcess:
+    """Run openshell with text piped to stdin (avoids newlines in args)."""
+    cmd = [openshell, *args]
+    if not quiet:
+        click.echo(f"+ {shlex.join(cmd)} (stdin piped)", err=True)
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, text=True)
+    stdout, stderr = proc.communicate(input=stdin_text)
+    if stdout:
+        for line in stdout.splitlines():
+            if any(p in line for p in _NOISE_PATTERNS):
+                continue
+            sys.stdout.write(line + "\n")
+    if stderr:
+        for line in stderr.splitlines():
+            if any(p in line for p in _NOISE_PATTERNS):
+                continue
+            sys.stderr.write(line + "\n")
+    return subprocess.CompletedProcess(cmd, proc.returncode)
+
+
+def _sandbox_exists(openshell: str, name: str) -> bool:
+    """Check if sandbox exists by parsing openshell sandbox list."""
+    result = _openshell_exec(openshell, ["sandbox", "list"], quiet=True, capture=True)
+    if result.returncode != 0:
+        return False
+    clean = _ANSI_RE.sub("", result.stdout or "")
+    for line in clean.splitlines():
+        fields = line.split()
+        if fields and fields[0] == name:
+            return True
+    return False
+
+
+def _wait_sandbox_ready(openshell: str, name: str, timeout: int = 60) -> None:
+    """Poll until sandbox reaches Ready phase. Raises SystemExit on timeout."""
+    click.echo(f"  Waiting for sandbox '{name}' to be ready...")
+    for i in range(1, timeout + 1):
+        result = _openshell_exec(openshell, ["sandbox", "list"], quiet=True, capture=True)
+        clean = _ANSI_RE.sub("", result.stdout or "")
+        for line in clean.splitlines():
+            fields = line.split()
+            if fields and fields[0] == name and fields[-1] == "Ready":
+                probe = _openshell_exec(openshell, ["sandbox", "exec", "--name", name,
+                                                    "--no-tty", "--", "true"], quiet=True, capture=True)
+                if probe.returncode == 0:
+                    click.echo(f"  Sandbox '{name}' is ready.")
+                    return
+        if i == timeout:
+            click.echo(f"error: sandbox '{name}' did not become ready within {timeout}s", err=True)
+            sys.exit(1)
+        if i % 5 == 0:
+            click.echo(f"  Waiting... ({i}s)")
+        time.sleep(1)
+
+
+def _ensure_gitignore(project_dir: pathlib.Path) -> None:
+    """Add sensitive patterns to .gitignore if not already present."""
+    gitignore = project_dir / ".gitignore"
+    changed = False
+    for pat in _SENSITIVE_PATTERNS:
+        existing = gitignore.read_text() if gitignore.exists() else ""
+        if pat not in existing.splitlines():
+            with gitignore.open("a") as f:
+                f.write(pat + "\n")
+            changed = True
+    if changed:
+        click.echo("  Updated .gitignore to exclude sensitive files from upload.")
+
+
+def _warn_sensitive_skips(project_dir: pathlib.Path) -> None:
+    """Print SKIP warnings for sensitive files/dirs that won't be uploaded."""
+    for pat in _SENSITIVE_PATTERNS:
+        if pat.endswith("/"):
+            d = project_dir / pat.rstrip("/")
+            if d.is_dir():
+                click.echo(f"  SKIP (sensitive): {d}/")
+        elif "*" in pat:
+            for f in project_dir.glob(pat):
+                click.echo(f"  SKIP (sensitive): {f}")
+        else:
+            f = project_dir / pat
+            if f.is_file():
+                click.echo(f"  SKIP (sensitive): {f}")
+
+
+def _teleport_impl(sandbox_name: str, project_dir: pathlib.Path, openshell: str,
+                   model: str, custom_image: bool) -> None:
+    """Full teleport implementation: provider, create/detect sandbox, setup, upload."""
+
+    # Step 1: Ensure litellm provider exists
+    click.echo("Checking for litellm provider...")
+    result = _openshell_exec(openshell, ["provider", "list"], quiet=True, capture=True)
+    if "litellm" in (result.stdout or ""):
+        click.echo("  litellm provider found.")
+    else:
+        click.echo("  litellm provider not found, creating...")
+        token = os.environ.get("ANTHROPIC_AUTH_TOKEN")
+        if not token:
+            click.echo("error: ANTHROPIC_AUTH_TOKEN is not set.", err=True)
+            click.echo("Export it before running this command:", err=True)
+            click.echo("  export ANTHROPIC_AUTH_TOKEN=<your-token>", err=True)
+            sys.exit(1)
+        cred_args = ["--credential", f"ANTHROPIC_AUTH_TOKEN={token}"]
+        bob_key = os.environ.get("BOBSHELL_API_KEY")
+        if bob_key:
+            cred_args += ["--credential", f"BOBSHELL_API_KEY={bob_key}"]
+        _openshell_exec(openshell, ["provider", "create", "--name", "litellm",
+                                    "--type", "generic", *cred_args])
+        click.echo("  litellm provider created.")
+
+    # Step 2: Verify .claude dir exists
+    if not (project_dir / ".claude").is_dir():
+        click.echo(f"error: no .claude directory found in {project_dir}", err=True)
+        click.echo("Run this command from a project directory that has a .claude/ folder.", err=True)
+        sys.exit(1)
+
+    click.echo(f"Project directory: {project_dir}")
+    click.echo(f"Sandbox name: {sandbox_name}")
+
+    # Step 3: Create sandbox or skip if exists
+    click.echo(f"Checking for existing sandbox '{sandbox_name}'...")
+    if _sandbox_exists(openshell, sandbox_name):
+        click.echo(f"  Sandbox '{sandbox_name}' already exists.")
+    else:
+        click.echo(f"  Creating sandbox '{sandbox_name}'...")
+        policy_file = _find_support_file("litellm_sandbox_policy.yaml")
+        if not policy_file.exists():
+            click.echo(f"error: policy file not found: {policy_file}", err=True)
+            sys.exit(1)
+
+        create_args = ["sandbox", "create", "--name", sandbox_name,
+                       "--policy", str(policy_file), "--provider", "litellm"]
+        if custom_image:
+            dockerfile = _find_support_file("Dockerfile.sandbox")
+            if dockerfile.exists():
+                click.echo(f"  Using custom Dockerfile: {dockerfile}")
+                create_args += ["--from", str(dockerfile)]
+        create_args += ["--no-tty", "--", "true"]
+        _openshell_exec(openshell, create_args)
+        click.echo(f"  Sandbox '{sandbox_name}' created.")
+
+        # Wait for Ready
+        _wait_sandbox_ready(openshell, sandbox_name)
+
+        # Step 4: One-time .bashrc setup
+        click.echo("  Configuring sandbox environment...")
+        bashrc_content = f"""\
+export PATH="$HOME/.local/bin:$PATH"
+export PATH="/sandbox/.npm-global/bin:$PATH"
+export ANTHROPIC_BASE_URL="{LITELLM_BASE_URL}"
+export CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1
+export NODE_NO_WARNINGS=1
+export ANTHROPIC_MODEL="{model}"
+export HOME={project_dir}
+cd "{project_dir}" 2>/dev/null || true
+alias kosh="echo \\"kosh is not available inside the sandbox. To run kosh commands, exit the sandbox (type exit) or use another terminal.\\""
+"""
+        _openshell_pipe_stdin(openshell,
+                             ["sandbox", "exec", "--name", sandbox_name,
+                              "--no-tty", "--", "sh", "-c", "cat >> /sandbox/.bashrc"],
+                             bashrc_content)
+
+        profile_line = f'cd "{project_dir}" 2>/dev/null || true\n'
+        _openshell_pipe_stdin(openshell,
+                             ["sandbox", "exec", "--name", sandbox_name,
+                              "--no-tty", "--", "sh", "-c", "cat >> /sandbox/.profile"],
+                             profile_line)
+        click.echo("  Environment configured.")
+
+        # Step 5: One-time Bob install
+        click.echo("\n  Installing Bob shell...")
+        bob_install = _find_support_file("bob-install.sh")
+        if not bob_install.exists():
+            click.echo(f"  ERROR: {bob_install} not found", err=True)
+            click.echo("  Trying official installer as fallback...", err=True)
+            _openshell_exec(openshell, ["sandbox", "exec", "--name", sandbox_name,
+                                        "--no-tty", "--", "bash", "-c",
+                                        "curl -fsSL https://bob.ibm.com/download/bobshell.sh | bash"],
+                            quiet=True)
+        else:
+            _openshell_exec(openshell, ["sandbox", "upload", sandbox_name,
+                                        str(bob_install), "/tmp/"])
+            result = _openshell_exec(openshell, ["sandbox", "exec", "--name", sandbox_name,
+                                                  "--no-tty", "--", "bash", "/tmp/bob-install.sh"])
+            if result.returncode == 0:
+                click.echo("  Bob installed.")
+            else:
+                click.echo("  WARNING: Bob install failed.", err=True)
+                _openshell_exec(openshell, ["sandbox", "exec", "--name", sandbox_name,
+                                            "--no-tty", "--", "bash", "-c",
+                                            "curl -fsSL https://bob.ibm.com/download/bobshell.sh | bash"],
+                                quiet=True)
+
+    # Step 6: Wait for ready (existing sandboxes may be restarting)
+    _wait_sandbox_ready(openshell, sandbox_name)
+
+    # Step 7: Upload files
+    # Remove dangling symlinks
+    for root, dirs, files in os.walk(project_dir):
+        for name in files:
+            fp = pathlib.Path(root) / name
+            if fp.is_symlink() and not fp.exists():
+                fp.unlink()
+
+    _ensure_gitignore(project_dir)
+    _warn_sensitive_skips(project_dir)
+
+    parent_dir = str(project_dir.parent)
+    click.echo(f"Uploading files from {project_dir} to sandbox:{project_dir} ...")
+    _openshell_exec(openshell, ["sandbox", "exec", "--name", sandbox_name,
+                                "--", "mkdir", "-p", parent_dir])
+    _openshell_exec(openshell, ["sandbox", "upload", sandbox_name,
+                                str(project_dir), parent_dir + "/"])
+    if (project_dir / ".claude").is_dir():
+        click.echo("  Uploading .claude/ (gitignored, using --no-git-ignore)...")
+        _openshell_exec(openshell, ["sandbox", "upload", "--no-git-ignore", sandbox_name,
+                                    str(project_dir / ".claude"), str(project_dir) + "/"])
+    click.echo("  Files uploaded.")
+
+    click.echo(f"\nDone. Sandbox '{sandbox_name}' is ready.")
+    click.echo(f"\nTo connect:")
+    click.echo(f"  kosh sandbox connect {sandbox_name}")
+
+
+def _scan_mtimes(directory: pathlib.Path) -> dict[str, float]:
+    """Scan all files and return {relative_path: mtime}."""
+    mtimes: dict[str, float] = {}
+    for root, dirs, files in os.walk(directory):
+        root_path = pathlib.Path(root)
+        rel_root = root_path.relative_to(directory)
+        # Skip hidden dirs and common noise
+        dirs[:] = [d for d in dirs if not d.startswith(".") or d == ".claude"]
+        for f in files:
+            if f.startswith("."):
+                continue
+            rel = str(rel_root / f) if str(rel_root) != "." else f
+            if _is_sensitive(rel):
+                continue
+            fp = root_path / f
+            try:
+                mtimes[rel] = fp.stat().st_mtime
+            except OSError:
+                pass
+    # Also scan .claude/ explicitly
+    claude_dir = directory / ".claude"
+    if claude_dir.is_dir():
+        for root, dirs, files in os.walk(claude_dir):
+            root_path = pathlib.Path(root)
+            rel_root = root_path.relative_to(directory)
+            for f in files:
+                rel = str(rel_root / f)
+                fp = root_path / f
+                try:
+                    mtimes[rel] = fp.stat().st_mtime
+                except OSError:
+                    pass
+    return mtimes
+
+
+def _watch_and_sync(sandbox_name: str, directory: pathlib.Path, openshell: str,
+                    interval: float = 2.0) -> None:
+    """Watch directory for changes and upload modified files to remote sandbox."""
+    click.echo(f"\nWatching {directory} for changes (Ctrl+C to stop)...")
+    click.echo(f"  Sandbox: {sandbox_name}")
+    click.echo(f"  Interval: {interval}s\n")
+
+    prev_mtimes = _scan_mtimes(directory)
+    heartbeat_count = 0
+
+    try:
+        while True:
+            time.sleep(interval)
+            curr_mtimes = _scan_mtimes(directory)
+
+            changed: list[str] = []
+            for rel, mtime in curr_mtimes.items():
+                if rel not in prev_mtimes or prev_mtimes[rel] < mtime:
+                    changed.append(rel)
+
+            deleted = [r for r in prev_mtimes if r not in curr_mtimes]
+
+            if changed:
+                heartbeat_count = 0
+                click.echo(f"\n[{time.strftime('%H:%M:%S')}] {len(changed)} file(s) changed:")
+                for rel in changed:
+                    local_path = directory / rel
+                    remote_dir = str(directory / pathlib.Path(rel).parent)
+                    click.echo(f"  uploading: {rel}")
+                    cmd = [openshell, "sandbox", "upload", sandbox_name,
+                           str(local_path), remote_dir + "/"]
+                    proc = subprocess.run(cmd, capture_output=True, text=True)
+                    if proc.returncode != 0:
+                        stderr = proc.stderr.strip()
+                        if stderr:
+                            click.echo(f"    error: {stderr}", err=True)
+                click.echo(f"  synced {len(changed)} file(s).")
+            elif deleted:
+                heartbeat_count = 0
+                click.echo(f"\n[{time.strftime('%H:%M:%S')}] {len(deleted)} file(s) deleted locally (not removed from remote)")
+            else:
+                heartbeat_count += 1
+                if heartbeat_count % 5 == 0:
+                    click.echo(".", nl=False)
+                    sys.stdout.flush()
+
+            prev_mtimes = curr_mtimes
+
+    except KeyboardInterrupt:
+        click.echo(f"\n\nWatch stopped.")
 
 
 def _kosh_config_dir() -> pathlib.Path:

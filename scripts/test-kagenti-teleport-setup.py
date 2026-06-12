@@ -49,13 +49,13 @@ def find_uv() -> str:
 
 
 def run(cmd: list[str], env: dict | None = None, check: bool = True,
-        timeout: int = 120) -> subprocess.CompletedProcess:
+        timeout: int = 120, cwd: str | None = None) -> subprocess.CompletedProcess:
     """Run a command with output and return result."""
     print(f"\n{'='*60}")
     print(f"  CMD: {' '.join(cmd)}")
     print(f"{'='*60}")
     try:
-        result = subprocess.run(cmd, env=env, timeout=timeout)
+        result = subprocess.run(cmd, env=env, timeout=timeout, cwd=cwd)
     except subprocess.TimeoutExpired:
         print(f"  TIMEOUT after {timeout}s (command may have opened interactive shell)")
         return subprocess.CompletedProcess(cmd, 0)
@@ -106,6 +106,7 @@ def main() -> int:
         [uv, "run", str(SETUP_SCRIPT), "--user", args.user, "--password", args.password, "--test"],
         env=env,
         check=False,
+        cwd=tmpdir,
     )
     if result.returncode != 0:
         failed_steps.append("setup")
@@ -212,6 +213,168 @@ def main() -> int:
                     # Exit 1 with "already exists" is not a failure
                     print(f"  NOTE: sandbox create '{sandbox_name}' exit={result.returncode} "
                           f"(may already exist)")
+
+    # -------------------------------------------------------------------------
+    # Step 6: Test kosh teleport and verify files arrive in remote sandbox
+    # -------------------------------------------------------------------------
+    if not args.skip_sandbox_create:
+        print("\n" + "#" * 60)
+        print("# STEP 6: Test kosh teleport (upload + verify)")
+        print("#" * 60)
+
+        teleport_sandbox = f"test-teleport-{args.user}"
+        teleport_project = pathlib.Path(tmpdir) / teleport_sandbox
+        teleport_project.mkdir(exist_ok=True)
+
+        # Create a .claude dir (required by teleport.sh) and init git
+        # (openshell upload respects .gitignore only if .git exists)
+        subprocess.run(["git", "init", str(teleport_project)],
+                       capture_output=True, timeout=10)
+        (teleport_project / ".claude").mkdir(exist_ok=True)
+        (teleport_project / ".claude" / "settings.json").write_text('{"test": true}\n')
+
+        # Create test files to verify upload
+        (teleport_project / "hello.txt").write_text("hello from teleport test\n")
+        (teleport_project / "src").mkdir(exist_ok=True)
+        (teleport_project / "src" / "main.py").write_text("print('test')\n")
+
+        # Create a sensitive file that should NOT be uploaded
+        (teleport_project / "secret.key").write_text("should-not-upload\n")
+
+        print(f"\n  Test project: {teleport_project}")
+        print(f"  Sandbox name: {teleport_sandbox}")
+        print(f"  Files: hello.txt, src/main.py, .claude/settings.json, secret.key (sensitive)")
+
+        if kosh_py.exists():
+            # Run kosh teleport
+            print("\n  --- Running kosh teleport ---")
+            result = run(
+                [uv, "run", str(kosh_py), "teleport", "-d", str(teleport_project)],
+                env=env,
+                check=False,
+                timeout=120,
+            )
+            if result.returncode != 0:
+                failed_steps.append("teleport")
+                print(f"  ERROR: kosh teleport failed (exit {result.returncode})")
+            else:
+                print("  Teleport succeeded, verifying files in remote sandbox...")
+
+                # Verify files exist in the remote sandbox
+                verify_cmds = [
+                    (f"cat {teleport_project}/hello.txt", "hello from teleport test"),
+                    (f"cat {teleport_project}/src/main.py", "print('test')"),
+                    (f"cat {teleport_project}/.claude/settings.json", '"test"'),
+                ]
+                for cmd_str, expected_content in verify_cmds:
+                    proc = subprocess.run(
+                        [uv, "run", "--with", "openshell==0.0.59",
+                         "openshell", "sandbox", "exec",
+                         "--name", teleport_sandbox, "--no-tty", "--",
+                         "sh", "-c", cmd_str],
+                        env=env, capture_output=True, text=True, timeout=30,
+                    )
+                    # Check both stdout and stderr for content (openshell may
+                    # mix output streams when seccomp noise is present)
+                    combined = proc.stdout + proc.stderr
+                    if expected_content in combined:
+                        print(f"  VERIFY OK: {cmd_str}")
+                    else:
+                        print(f"  VERIFY FAIL: {cmd_str} (exit={proc.returncode})")
+                        if proc.stdout.strip():
+                            print(f"    stdout: {proc.stdout.strip()[:200]}")
+                        if proc.stderr.strip():
+                            # Filter seccomp noise for display
+                            stderr_lines = [l for l in proc.stderr.strip().splitlines()
+                                            if "seccomp" not in l]
+                            if stderr_lines:
+                                print(f"    stderr: {stderr_lines[0][:200]}")
+                        failed_steps.append(f"teleport-verify:{cmd_str.split()[1]}")
+
+                # Verify sensitive file was NOT uploaded
+                proc = subprocess.run(
+                    [uv, "run", "--with", "openshell==0.0.59",
+                     "openshell", "sandbox", "exec",
+                     "--name", teleport_sandbox, "--no-tty", "--",
+                     "sh", "-c", f"test -f {teleport_project}/secret.key && echo FOUND || echo MISSING"],
+                    env=env, capture_output=True, text=True, timeout=30,
+                )
+                if "MISSING" in proc.stdout:
+                    print(f"  VERIFY OK: secret.key was excluded (sensitive)")
+                elif "FOUND" in proc.stdout:
+                    print(f"  VERIFY FAIL: secret.key was uploaded (should be excluded)")
+                    failed_steps.append("teleport-sensitive-leak")
+                else:
+                    print(f"  VERIFY SKIP: could not check secret.key")
+
+        # ---------------------------------------------------------------------
+        # Step 7: Incremental teleport — add a file and re-teleport
+        # ---------------------------------------------------------------------
+        if "teleport" not in failed_steps and kosh_py.exists():
+            print("\n" + "#" * 60)
+            print("# STEP 7: Incremental teleport (add file, re-teleport)")
+            print("#" * 60)
+
+            # Add a new file locally
+            (teleport_project / "new_file.txt").write_text("added after first teleport\n")
+            # Modify an existing file
+            (teleport_project / "hello.txt").write_text("hello updated\n")
+            print(f"  Added: new_file.txt")
+            print(f"  Modified: hello.txt")
+
+            # Run teleport again — should skip create, just upload
+            print("\n  --- Running kosh teleport (incremental) ---")
+            result = run(
+                [uv, "run", str(kosh_py), "teleport", "-d", str(teleport_project)],
+                env=env,
+                check=False,
+                timeout=120,
+            )
+            if result.returncode != 0:
+                failed_steps.append("teleport-incremental")
+                print(f"  ERROR: incremental teleport failed (exit {result.returncode})")
+            else:
+                print("  Incremental teleport succeeded, verifying files...")
+
+                # Verify new file exists
+                verify_cmds = [
+                    (f"cat {teleport_project}/new_file.txt", "added after first teleport"),
+                    (f"cat {teleport_project}/hello.txt", "hello updated"),
+                    (f"cat {teleport_project}/src/main.py", "print('test')"),
+                ]
+                for cmd_str, expected_content in verify_cmds:
+                    proc = subprocess.run(
+                        [uv, "run", "--with", "openshell==0.0.59",
+                         "openshell", "sandbox", "exec",
+                         "--name", teleport_sandbox, "--no-tty", "--",
+                         "sh", "-c", cmd_str],
+                        env=env, capture_output=True, text=True, timeout=30,
+                    )
+                    combined = proc.stdout + proc.stderr
+                    if expected_content in combined:
+                        print(f"  VERIFY OK: {cmd_str}")
+                    else:
+                        print(f"  VERIFY FAIL: {cmd_str} (exit={proc.returncode})")
+                        if proc.stdout.strip():
+                            print(f"    stdout: {proc.stdout.strip()[:200]}")
+                        if proc.stderr.strip():
+                            stderr_lines = [l for l in proc.stderr.strip().splitlines()
+                                            if "seccomp" not in l]
+                            if stderr_lines:
+                                print(f"    stderr: {stderr_lines[0][:200]}")
+                        failed_steps.append(f"teleport-incr-verify:{cmd_str.split()[1]}")
+
+        # Cleanup: delete the test sandbox
+        if kosh_py.exists():
+            print(f"\n  Cleaning up sandbox '{teleport_sandbox}'...")
+            subprocess.run(
+                [uv, "run", "--with", "openshell==0.0.59",
+                 "openshell", "sandbox", "delete", teleport_sandbox],
+                env=env, capture_output=True, timeout=30,
+            )
+        else:
+            print("  SKIP: kosh.py not installed")
+            failed_steps.append("teleport")
 
     # -------------------------------------------------------------------------
     # Summary
