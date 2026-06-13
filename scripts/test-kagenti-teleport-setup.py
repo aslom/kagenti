@@ -299,6 +299,28 @@ def main() -> int:
                     print(f"  VERIFY SKIP: could not check secret.key")
 
         # ---------------------------------------------------------------------
+        # Step 5b: Verify no seccomp noise in kosh output
+        # ---------------------------------------------------------------------
+        if "teleport" not in failed_steps and kosh_py.exists():
+            print("\n  --- Checking for seccomp noise suppression ---")
+            seccomp_marker = "openshell_sandbox::sandbox::linux::seccomp"
+            for check_cmd, label in [
+                ([uv, "run", str(kosh_py), "sandbox", "exec",
+                  "--name", teleport_sandbox, "--no-tty", "--", "echo", "noise-check"],
+                 "sandbox exec"),
+                ([uv, "run", str(kosh_py), "sandbox", "list"],
+                 "sandbox list"),
+            ]:
+                proc = subprocess.run(check_cmd, env=env,
+                                      capture_output=True, text=True, timeout=30)
+                combined = proc.stdout + proc.stderr
+                if seccomp_marker in combined:
+                    print(f"  VERIFY FAIL: seccomp noise in '{label}' output")
+                    failed_steps.append(f"seccomp-noise:{label}")
+                else:
+                    print(f"  VERIFY OK: no seccomp noise in '{label}'")
+
+        # ---------------------------------------------------------------------
         # Step 6: Incremental teleport — add a file and re-teleport
         # ---------------------------------------------------------------------
         if "teleport" not in failed_steps and kosh_py.exists():

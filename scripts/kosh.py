@@ -146,18 +146,139 @@ def _make_passthrough(name: str) -> click.Command:
         openshell = _find_openshell()
         cmd = [openshell, name, *args]
         click.echo(f"+ {shlex.join(cmd)}", err=True)
-        proc = subprocess.Popen(
-            cmd, stdin=sys.stdin, stdout=sys.stdout,
-            stderr=subprocess.PIPE, text=True,
-        )
-        for line in proc.stderr:
-            if any(pat in line for pat in _NOISE_PATTERNS):
-                continue
-            sys.stderr.write(line)
-        sys.exit(proc.wait())
+        sys.exit(_passthrough_exec(cmd))
 
     proxy.help = f"(passthrough) openshell {name}"
     return proxy
+
+
+def _passthrough_exec(cmd: list[str]) -> int:
+    """Execute an openshell command filtering seccomp noise from both streams.
+
+    Uses pty for interactive commands (connect/term) so that seccomp noise
+    printed via the PTY (stdout) is also filtered. Non-TTY environments
+    fall back to Popen with stderr filtering.
+    """
+    import pty
+    import select
+
+    if not sys.stdin.isatty():
+        proc = subprocess.Popen(
+            cmd, stdin=sys.stdin, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True,
+        )
+        import threading
+
+        def _filter_stderr():
+            for line in proc.stderr:
+                if any(pat in line for pat in _NOISE_PATTERNS):
+                    continue
+                sys.stderr.write(line)
+                sys.stderr.flush()
+
+        t = threading.Thread(target=_filter_stderr, daemon=True)
+        t.start()
+        for line in proc.stdout:
+            if any(pat in line for pat in _NOISE_PATTERNS):
+                continue
+            sys.stdout.write(line)
+            sys.stdout.flush()
+        t.join(timeout=2)
+        return proc.wait()
+
+    # Interactive: use pty to intercept stdout (where seccomp noise appears)
+    import termios
+    import struct
+    import fcntl
+    import signal
+
+    master_fd, slave_fd = pty.openpty()
+
+    # Copy terminal size to slave pty
+    if sys.stdout.isatty():
+        win = fcntl.ioctl(sys.stdout, termios.TIOCGWINSZ, b'\x00' * 8)
+        fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, win)
+
+    proc = subprocess.Popen(
+        cmd, stdin=slave_fd, stdout=slave_fd, stderr=slave_fd,
+        close_fds=True, preexec_fn=os.setsid,
+    )
+    os.close(slave_fd)
+
+    # Forward SIGWINCH to child
+    def _resize(signum, frame):
+        if sys.stdout.isatty():
+            win = fcntl.ioctl(sys.stdout, termios.TIOCGWINSZ, b'\x00' * 8)
+            fcntl.ioctl(master_fd, termios.TIOCSWINSZ, win)
+            os.kill(proc.pid, signal.SIGWINCH)
+    signal.signal(signal.SIGWINCH, _resize)
+
+    # Put terminal in raw mode
+    old_attrs = termios.tcgetattr(sys.stdin)
+    try:
+        import tty
+        tty.setraw(sys.stdin)
+
+        noise_bytes = [pat.encode() for pat in _NOISE_PATTERNS]
+        buf = b""
+
+        while True:
+            try:
+                rlist, _, _ = select.select([sys.stdin, master_fd], [], [], 0.1)
+            except (OSError, ValueError):
+                break
+
+            if sys.stdin in rlist:
+                try:
+                    data = os.read(sys.stdin.fileno(), 4096)
+                    if not data:
+                        break
+                    os.write(master_fd, data)
+                except OSError:
+                    break
+
+            if master_fd in rlist:
+                try:
+                    data = os.read(master_fd, 4096)
+                    if not data:
+                        break
+                except OSError:
+                    break
+
+                # Filter seccomp noise line-by-line
+                buf += data
+                while b"\n" in buf:
+                    line, buf = buf.split(b"\n", 1)
+                    if any(pat in line for pat in noise_bytes):
+                        continue
+                    os.write(sys.stdout.fileno(), line + b"\n")
+                # Flush partial line (non-newline terminated output like prompts)
+                if buf and b"\n" not in buf:
+                    if not any(pat in buf for pat in noise_bytes):
+                        os.write(sys.stdout.fileno(), buf)
+                        buf = b""
+
+            if proc.poll() is not None:
+                # Drain remaining
+                try:
+                    remaining = os.read(master_fd, 4096)
+                    if remaining:
+                        for line in remaining.split(b"\n"):
+                            if any(pat in line for pat in noise_bytes):
+                                continue
+                            if line:
+                                os.write(sys.stdout.fileno(), line + b"\n")
+                except OSError:
+                    pass
+                break
+
+    finally:
+        termios.tcsetattr(sys.stdin, termios.TCSAFLUSH, old_attrs)
+        signal.signal(signal.SIGWINCH, signal.SIG_DFL)
+        os.close(master_fd)
+
+    proc.wait()
+    return proc.returncode
 
 
 CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
