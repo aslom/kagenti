@@ -71,7 +71,7 @@ def main() -> int:
     parser.add_argument("--password", "-p", default=DEFAULT_PASSWORD, help="Password (default: alice123)")
     parser.add_argument("--gateway-url", default=DEFAULT_GATEWAY_URL, help="Gateway URL")
     parser.add_argument("--keep-tmpdir", action="store_true", help="Don't remove TMPDIR after test")
-    parser.add_argument("--skip-sandbox-create", action="store_true", help="Skip sandbox creation step")
+    parser.add_argument("--skip-sandbox-create", action="store_true", help="Skip teleport/pull tests (sandbox creation)")
     parser.add_argument("--sandbox-policy", default=None, help="Path to sandbox policy file")
     args = parser.parse_args()
 
@@ -182,47 +182,15 @@ def main() -> int:
         failed_steps.append("sandbox-list")
 
     # -------------------------------------------------------------------------
-    # Step 5: Create sandboxes for claude and bob
+    # Step 5: Test kosh teleport and verify files arrive in remote sandbox
     # -------------------------------------------------------------------------
     if not args.skip_sandbox_create:
         print("\n" + "#" * 60)
-        print("# STEP 5: Create sandboxes (claude, bob)")
+        print("# STEP 5: Test kosh teleport (upload + verify)")
         print("#" * 60)
 
-        policy_file = args.sandbox_policy or str(install_dir / "litellm_sandbox_policy.yaml")
-        if not pathlib.Path(policy_file).exists():
-            policy_file = str(SCRIPT_DIR / "litellm_sandbox_policy.yaml")
-
-        if not pathlib.Path(policy_file).exists():
-            print(f"  ERROR: Policy file not found: {policy_file}", file=sys.stderr)
-            failed_steps.append("sandbox-create")
-        else:
-            for sandbox_name in ["claude", "bob"]:
-                print(f"\n  --- Creating sandbox: {sandbox_name} ---")
-                result = run(
-                    [uv, "run", "--with", "openshell==0.0.59",
-                     "openshell", "sandbox", "create",
-                     "--name", sandbox_name,
-                     "--policy", policy_file,
-                     "--no-tty", "--", "true"],
-                    env=env,
-                    check=False,
-                    timeout=30,
-                )
-                if result.returncode != 0:
-                    # Exit 1 with "already exists" is not a failure
-                    print(f"  NOTE: sandbox create '{sandbox_name}' exit={result.returncode} "
-                          f"(may already exist)")
-
-    # -------------------------------------------------------------------------
-    # Step 6: Test kosh teleport and verify files arrive in remote sandbox
-    # -------------------------------------------------------------------------
-    if not args.skip_sandbox_create:
-        print("\n" + "#" * 60)
-        print("# STEP 6: Test kosh teleport (upload + verify)")
-        print("#" * 60)
-
-        teleport_sandbox = f"test-teleport-{args.user}"
+        user = os.environ.get("USER", args.user)
+        teleport_sandbox = f"{user}-test-teleport"
         teleport_project = pathlib.Path(tmpdir) / teleport_sandbox
         teleport_project.mkdir(exist_ok=True)
 
@@ -238,12 +206,16 @@ def main() -> int:
         (teleport_project / "src").mkdir(exist_ok=True)
         (teleport_project / "src" / "main.py").write_text("print('test')\n")
 
+        # Create a binary file with NULL bytes and unprintable characters
+        binary_content = bytes(range(256)) + b"\x00\x01\x02\xff\xfe\xfd" * 100
+        (teleport_project / "test.bin").write_bytes(binary_content)
+
         # Create a sensitive file that should NOT be uploaded
         (teleport_project / "secret.key").write_text("should-not-upload\n")
 
         print(f"\n  Test project: {teleport_project}")
         print(f"  Sandbox name: {teleport_sandbox}")
-        print(f"  Files: hello.txt, src/main.py, .claude/settings.json, secret.key (sensitive)")
+        print(f"  Files: hello.txt, src/main.py, .claude/settings.json, test.bin (binary), secret.key (sensitive)")
 
         if kosh_py.exists():
             # Run kosh teleport
@@ -291,6 +263,25 @@ def main() -> int:
                                 print(f"    stderr: {stderr_lines[0][:200]}")
                         failed_steps.append(f"teleport-verify:{cmd_str.split()[1]}")
 
+                # Verify binary file was uploaded correctly (check sha256)
+                import hashlib
+                local_bin_hash = hashlib.sha256(binary_content).hexdigest()
+                proc = subprocess.run(
+                    [uv, "run", "--with", "openshell==0.0.59",
+                     "openshell", "sandbox", "exec",
+                     "--name", teleport_sandbox, "--no-tty", "--",
+                     "sh", "-c", f"sha256sum {teleport_project}/test.bin | cut -d' ' -f1"],
+                    env=env, capture_output=True, text=True, timeout=30,
+                )
+                remote_bin_hash = proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else ""
+                if remote_bin_hash == local_bin_hash:
+                    print(f"  VERIFY OK: test.bin binary integrity (sha256 match)")
+                else:
+                    print(f"  VERIFY FAIL: test.bin binary mismatch")
+                    print(f"    local:  {local_bin_hash}")
+                    print(f"    remote: {remote_bin_hash}")
+                    failed_steps.append("teleport-verify:test.bin")
+
                 # Verify sensitive file was NOT uploaded
                 proc = subprocess.run(
                     [uv, "run", "--with", "openshell==0.0.59",
@@ -308,11 +299,11 @@ def main() -> int:
                     print(f"  VERIFY SKIP: could not check secret.key")
 
         # ---------------------------------------------------------------------
-        # Step 7: Incremental teleport — add a file and re-teleport
+        # Step 6: Incremental teleport — add a file and re-teleport
         # ---------------------------------------------------------------------
         if "teleport" not in failed_steps and kosh_py.exists():
             print("\n" + "#" * 60)
-            print("# STEP 7: Incremental teleport (add file, re-teleport)")
+            print("# STEP 6: Incremental teleport (add file, re-teleport)")
             print("#" * 60)
 
             # Add a new file locally
@@ -363,6 +354,122 @@ def main() -> int:
                             if stderr_lines:
                                 print(f"    stderr: {stderr_lines[0][:200]}")
                         failed_steps.append(f"teleport-incr-verify:{cmd_str.split()[1]}")
+
+        # ---------------------------------------------------------------------
+        # Step 7: Pull from remote sandbox after modification
+        # ---------------------------------------------------------------------
+        if "teleport" not in failed_steps and kosh_py.exists():
+            print("\n" + "#" * 60)
+            print("# STEP 7: Test kosh pull (modify remote, pull back)")
+            print("#" * 60)
+
+            # Delete local binary to test pull roundtrip
+            (teleport_project / "test.bin").unlink(missing_ok=True)
+
+            # Modify a file in the remote sandbox
+            modify_cmd = f"echo 'modified remotely' >> {teleport_project}/hello.txt"
+            subprocess.run(
+                [uv, "run", "--with", "openshell==0.0.59",
+                 "openshell", "sandbox", "exec",
+                 "--name", teleport_sandbox, "--no-tty", "--",
+                 "sh", "-c", modify_cmd],
+                env=env, capture_output=True, timeout=30,
+            )
+            # Create a new file in remote sandbox
+            new_remote_cmd = f"echo 'created remotely' > {teleport_project}/remote_new.txt"
+            subprocess.run(
+                [uv, "run", "--with", "openshell==0.0.59",
+                 "openshell", "sandbox", "exec",
+                 "--name", teleport_sandbox, "--no-tty", "--",
+                 "sh", "-c", new_remote_cmd],
+                env=env, capture_output=True, timeout=30,
+            )
+            print("  Modified hello.txt and created remote_new.txt in remote sandbox")
+
+            # Run kosh pull
+            print("\n  --- Running kosh pull ---")
+            result = run(
+                [uv, "run", str(kosh_py), "pull", teleport_sandbox],
+                env=env,
+                check=False,
+                timeout=60,
+            )
+            if result.returncode != 0:
+                failed_steps.append("pull")
+                print(f"  ERROR: kosh pull failed (exit {result.returncode})")
+            else:
+                # Verify pulled files
+                hello_content = (teleport_project / "hello.txt").read_text()
+                if "modified remotely" in hello_content:
+                    print(f"  VERIFY OK: hello.txt contains remote modification")
+                else:
+                    print(f"  VERIFY FAIL: hello.txt missing remote content")
+                    print(f"    content: {hello_content.strip()[:200]}")
+                    failed_steps.append("pull-verify:hello.txt")
+
+                remote_new = teleport_project / "remote_new.txt"
+                if remote_new.exists() and "created remotely" in remote_new.read_text():
+                    print(f"  VERIFY OK: remote_new.txt pulled successfully")
+                else:
+                    print(f"  VERIFY FAIL: remote_new.txt not pulled or wrong content")
+                    failed_steps.append("pull-verify:remote_new.txt")
+
+                # Verify binary file roundtrip (teleport → pull preserves bytes)
+                pulled_bin = teleport_project / "test.bin"
+                if pulled_bin.exists():
+                    pulled_hash = hashlib.sha256(pulled_bin.read_bytes()).hexdigest()
+                    if pulled_hash == local_bin_hash:
+                        print(f"  VERIFY OK: test.bin binary roundtrip (sha256 match)")
+                    else:
+                        print(f"  VERIFY FAIL: test.bin binary corrupted after pull")
+                        print(f"    expected: {local_bin_hash}")
+                        print(f"    got:      {pulled_hash}")
+                        failed_steps.append("pull-verify:test.bin")
+                else:
+                    print(f"  VERIFY FAIL: test.bin not pulled")
+                    failed_steps.append("pull-verify:test.bin")
+
+        # ---------------------------------------------------------------------
+        # Step 8: Pull with dirty-file protection
+        # ---------------------------------------------------------------------
+        if "pull" not in failed_steps and kosh_py.exists():
+            print("\n" + "#" * 60)
+            print("# STEP 8: Test kosh pull (dirty-file protection)")
+            print("#" * 60)
+
+            # Modify a file locally without committing (make it dirty)
+            (teleport_project / "hello.txt").write_text("dirty local change\n")
+            # Stage to make git track it as modified
+            subprocess.run(["git", "add", "hello.txt"],
+                           cwd=str(teleport_project), capture_output=True, timeout=10)
+
+            # Modify file in remote again
+            modify_cmd2 = f"echo 'second remote change' > {teleport_project}/hello.txt"
+            subprocess.run(
+                [uv, "run", "--with", "openshell==0.0.59",
+                 "openshell", "sandbox", "exec",
+                 "--name", teleport_sandbox, "--no-tty", "--",
+                 "sh", "-c", modify_cmd2],
+                env=env, capture_output=True, timeout=30,
+            )
+            print("  Made hello.txt dirty locally, modified again in remote")
+
+            # Run kosh pull (should skip hello.txt)
+            print("\n  --- Running kosh pull (expect skip) ---")
+            result = run(
+                [uv, "run", str(kosh_py), "pull", teleport_sandbox],
+                env=env,
+                check=False,
+                timeout=60,
+            )
+            # Verify dirty file was NOT overwritten
+            hello_content = (teleport_project / "hello.txt").read_text()
+            if "dirty local change" in hello_content:
+                print(f"  VERIFY OK: hello.txt preserved (dirty-file protection)")
+            else:
+                print(f"  VERIFY FAIL: hello.txt was overwritten despite being dirty")
+                print(f"    content: {hello_content.strip()[:200]}")
+                failed_steps.append("pull-dirty-protection")
 
         # Cleanup: delete the test sandbox
         if kosh_py.exists():

@@ -27,6 +27,8 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tarfile
+import tempfile
 import time
 
 import click
@@ -395,6 +397,69 @@ def teleport(name: str | None, directory: str | None, watch: bool, openshell_bin
         sys.exit(result.returncode)
 
 
+@cli.command()
+@click.argument("name", default=None, required=False)
+@click.option("--dry-run", is_flag=True, default=False, help="Show what would be downloaded without writing files.")
+@click.option("--force", is_flag=True, default=False, help="Overwrite files with uncommitted local changes.")
+@click.option("--path", "specific_path", default=None, help="Pull only a specific file or directory.")
+@click.option("--openshell-bin", default=None, help="Path to openshell binary.")
+def pull(name: str | None, dry_run: bool, force: bool, specific_path: str | None, openshell_bin: str | None) -> None:
+    """Pull files from a remote OpenShell sandbox back to local directory.
+
+    Downloads changed files from the remote sandbox. By default, skips files
+    that have uncommitted local changes (use --force to overwrite).
+
+    NAME is the sandbox name. If not specified, uses the last teleported sandbox.
+
+    Examples:
+
+    \b
+        kosh pull
+        kosh pull my-project
+        kosh pull my-project --dry-run
+        kosh pull my-project --force
+        kosh pull my-project --path src/main.py
+    """
+    _check_not_in_sandbox("pull")
+
+    config_dir = _kosh_config_dir()
+    metadata = _read_metadata(config_dir)
+
+    # Resolve sandbox name
+    if name:
+        sandbox_name = name
+    else:
+        last = _load_last_sandbox(config_dir)
+        if last:
+            sandbox_name = pathlib.Path(last).name
+        else:
+            click.echo("error: no sandbox specified and no last teleported sandbox found.", err=True)
+            click.echo("Usage: kosh pull NAME", err=True)
+            sys.exit(1)
+
+    # Look up stored path mapping
+    sb_info = metadata.get("sandboxes", {}).get(sandbox_name, {})
+    local_path_str = sb_info.get("path")
+    remote_path_str = sb_info.get("remote_path")
+
+    if not local_path_str or not remote_path_str:
+        click.echo(f"error: no teleport mapping found for '{sandbox_name}'.", err=True)
+        click.echo("Run 'kosh teleport' first to establish the local↔remote mapping.", err=True)
+        sys.exit(1)
+
+    local_dir = pathlib.Path(local_path_str)
+    if not local_dir.is_dir():
+        click.echo(f"error: local directory '{local_dir}' does not exist.", err=True)
+        sys.exit(1)
+
+    osbin = openshell_bin or _find_openshell()
+    action = "Dry-run pull" if dry_run else "Pulling"
+    click.echo(f"{action} from sandbox '{sandbox_name}' → {local_dir}")
+
+    _pull_impl(sandbox_name, local_dir, remote_path_str, osbin,
+               dry_run=dry_run, force=force, specific_path=specific_path)
+
+
 def _find_support_file(name: str) -> pathlib.Path:
     """Find a support file: check SCRIPT_DIR first, then ~/.config/kosh/."""
     candidate = SCRIPT_DIR / name
@@ -701,9 +766,137 @@ alias kosh="echo \\"kosh is not available inside the sandbox. To run kosh comman
                                     str(project_dir / ".claude"), str(project_dir) + "/"])
     click.echo("  Files uploaded.")
 
+    # Store teleport mapping for kosh pull
+    config_dir = _kosh_config_dir()
+    metadata = _read_metadata(config_dir)
+    sb = metadata["sandboxes"].setdefault(sandbox_name, {})
+    sb["path"] = str(project_dir)
+    sb["remote_path"] = str(project_dir)
+    _write_metadata(config_dir, metadata)
+
     click.echo(f"\nDone. Sandbox '{sandbox_name}' is ready.")
     click.echo(f"\nTo connect:")
     click.echo(f"  kosh sandbox connect {sandbox_name}")
+
+
+def _pull_impl(sandbox_name: str, local_dir: pathlib.Path, remote_path: str,
+               openshell: str, dry_run: bool = False, force: bool = False,
+               specific_path: str | None = None) -> None:
+    """Pull files from remote sandbox back to local directory."""
+    # List remote files
+    find_target = remote_path
+    if specific_path:
+        find_target = str(pathlib.PurePosixPath(remote_path) / specific_path)
+
+    result = _openshell_exec(openshell, ["sandbox", "exec", "--name", sandbox_name,
+                                         "--no-tty", "--",
+                                         "find", find_target, "-type", "f"],
+                             quiet=True, capture=True)
+    if result.returncode != 0:
+        click.echo(f"error: could not list files in remote sandbox '{sandbox_name}'.", err=True)
+        sys.exit(1)
+
+    remote_files: list[str] = []
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if not line or not line.startswith("/"):
+            continue
+        rel = os.path.relpath(line, remote_path)
+        if rel.startswith(".git/") or rel == ".git":
+            continue
+        if _is_sensitive(rel):
+            continue
+        remote_files.append(rel)
+
+    if not remote_files:
+        click.echo("No files to pull.")
+        return
+
+    # Get git-dirty files
+    git_dirty: set[str] = set()
+    if (local_dir / ".git").exists():
+        proc = subprocess.run(["git", "diff", "--name-only"],
+                              cwd=str(local_dir), capture_output=True, text=True)
+        if proc.returncode == 0:
+            git_dirty.update(l for l in proc.stdout.splitlines() if l.strip())
+        proc = subprocess.run(["git", "diff", "--cached", "--name-only"],
+                              cwd=str(local_dir), capture_output=True, text=True)
+        if proc.returncode == 0:
+            git_dirty.update(l for l in proc.stdout.splitlines() if l.strip())
+
+    # Classify files
+    to_download: list[tuple[str, str]] = []  # (rel_path, reason)
+    skipped_dirty: list[str] = []
+    unchanged: int = 0
+
+    for rel in remote_files:
+        local_file = local_dir / rel
+        if rel in git_dirty and not force:
+            skipped_dirty.append(rel)
+            continue
+        if not local_file.exists():
+            to_download.append((rel, "new"))
+        else:
+            to_download.append((rel, "updated"))
+
+    if dry_run:
+        if to_download:
+            click.echo(f"Would download: {len(to_download)} file(s)")
+            for rel, reason in to_download:
+                click.echo(f"  {reason:8s}  {rel}")
+        if skipped_dirty:
+            click.echo(f"Skipped (local changes): {len(skipped_dirty)} file(s)")
+            for rel in skipped_dirty:
+                click.echo(f"  dirty:    {rel}")
+        if not to_download and not skipped_dirty:
+            click.echo("Nothing to pull (all files unchanged).")
+        return
+
+    # Download via tarball (handles binary files, single round-trip)
+    # Create tar in /sandbox/ (within openshell download workspace)
+    tar_remote = "/sandbox/.kosh-pull.tar.gz"
+    file_list = [rel for rel, _ in to_download]
+
+    # Build tar command: tar czf /sandbox/.kosh-pull.tar.gz -C <remote_path> file1 file2 ...
+    tar_cmd = ["tar", "czf", tar_remote, "-C", remote_path] + file_list
+    result = _openshell_exec(openshell, ["sandbox", "exec", "--name", sandbox_name,
+                                         "--no-tty", "--"] + tar_cmd, quiet=True)
+    if result.returncode != 0:
+        click.echo("error: failed to create tarball in remote sandbox.", err=True)
+        sys.exit(1)
+
+    # Download tarball to local temp location
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = pathlib.Path(tmp)
+        dl_result = subprocess.run(
+            [openshell, "sandbox", "download", sandbox_name, tar_remote, tmp + "/"],
+            capture_output=True, text=True, timeout=60,
+        )
+        if dl_result.returncode != 0:
+            click.echo(f"error: failed to download tarball: {dl_result.stderr.strip()}", err=True)
+            sys.exit(1)
+
+        # Extract tarball into local_dir
+        tar_local = tmp_path / ".kosh-pull.tar.gz"
+        with tarfile.open(tar_local, "r:gz") as tf:
+            tf.extractall(path=str(local_dir))
+
+    # Clean up remote tarball
+    _openshell_exec(openshell, ["sandbox", "exec", "--name", sandbox_name,
+                                "--no-tty", "--", "rm", "-f", tar_remote], quiet=True)
+
+    downloaded = len(file_list)
+    for rel, reason in to_download:
+        click.echo(f"  {reason:8s}  {rel}")
+
+    # Summary
+    parts = [f"Pulled {downloaded} file(s)"]
+    if skipped_dirty:
+        parts.append(f"skipped {len(skipped_dirty)} (dirty)")
+        for rel in skipped_dirty:
+            click.echo(f"  warning: skipped '{rel}' (uncommitted local changes)", err=True)
+        click.echo("  hint: use --force to overwrite, or git stash/commit first", err=True)
+    click.echo(", ".join(parts) + ".")
 
 
 def _scan_mtimes(directory: pathlib.Path) -> dict[str, float]:
