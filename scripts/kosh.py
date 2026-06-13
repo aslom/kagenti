@@ -91,7 +91,6 @@ def _check_not_in_sandbox(cmd_name: str) -> None:
 
 
 OPENSHELL_PASSTHROUGH = [
-    "sandbox",
     "gateway",
     "status",
     "forward",
@@ -407,6 +406,62 @@ def completions(shell: str) -> None:
         sys.exit(1)
     comp = comp_cls(cli, {}, "kosh", "_KOSH_COMPLETE")
     click.echo(comp.source())
+
+
+# ---------------------------------------------------------------------------
+# sandbox group — delegates to openshell but exposes subcommands for completion
+# ---------------------------------------------------------------------------
+
+_SANDBOX_SUBCOMMANDS = [
+    "create", "get", "list", "delete", "exec", "connect",
+    "upload", "download", "ssh-config", "provider", "sb",
+]
+
+
+class SandboxGroup(click.Group):
+    """Sandbox group that delegates unknown subcommands to openshell sandbox."""
+
+    def get_command(self, ctx: click.Context, cmd_name: str) -> click.Command | None:
+        cmd = super().get_command(ctx, cmd_name)
+        if cmd is not None:
+            return cmd
+        if cmd_name in _SANDBOX_SUBCOMMANDS:
+            return _make_sandbox_subcommand(cmd_name)
+        return None
+
+    def list_commands(self, ctx: click.Context) -> list[str]:
+        return sorted(_SANDBOX_SUBCOMMANDS)
+
+
+def _make_sandbox_subcommand(subcmd: str) -> click.Command:
+    @click.command(
+        subcmd,
+        context_settings={
+            "ignore_unknown_options": True,
+            "allow_extra_args": True,
+            "allow_interspersed_args": False,
+            "help_option_names": [],
+        },
+    )
+    @click.argument("args", nargs=-1, type=click.UNPROCESSED)
+    def handler(args: tuple[str, ...]) -> None:
+        _check_not_in_sandbox("sandbox")
+        openshell = _find_openshell()
+        cmd = [openshell, "sandbox", subcmd, *args]
+        click.echo(f"+ {shlex.join(cmd)}", err=True)
+        sys.exit(_passthrough_exec(cmd))
+
+    handler.help = f"openshell sandbox {subcmd}"
+    return handler
+
+
+@cli.group("sandbox", cls=SandboxGroup, context_settings=CONTEXT_SETTINGS,
+           invoke_without_command=True)
+@click.pass_context
+def sandbox_group(ctx: click.Context) -> None:
+    """Manage OpenShell sandboxes (list, create, connect, exec, ...)."""
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
 
 
 @cli.command()

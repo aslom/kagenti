@@ -518,6 +518,8 @@ def main() -> int:
                         help="Sync dev channel (files stored with dev-- prefix)")
     parser.add_argument("--github", action="store_true",
                         help="Fetch stable files from GitHub kosh branch (requires gh auth)")
+    parser.add_argument("--tag", default=None,
+                        help="Sync files from a git tag/ref (extracts to tmp dir, no checkout)")
     parser.add_argument("--url", default=None,
                         help="Override route URL")
     args = parser.parse_args()
@@ -565,7 +567,41 @@ def main() -> int:
     source_dir: pathlib.Path | None = None
     tmp_dir: pathlib.Path | None = None
 
-    if args.github:
+    if args.tag:
+        # Extract files from a git tag/ref without checking out
+        tmp_dir = pathlib.Path(tempfile.mkdtemp(prefix="kts-tag-"))
+        print(f"\n=== Extracting files from git ref '{args.tag}' ===\n")
+        git_root = SCRIPT_DIR.parent  # kagenti/ is the git repo
+        result = subprocess.run(
+            ["git", "archive", "--format=tar", args.tag, "--", "scripts/"],
+            cwd=str(git_root), capture_output=True,
+        )
+        if result.returncode != 0:
+            print(f"  ERROR: git archive failed: {result.stderr.decode().strip()}", file=sys.stderr)
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            return 1
+        import tarfile as _tarfile
+        import io
+        with _tarfile.open(fileobj=io.BytesIO(result.stdout), mode="r:") as tf:
+            tf.extractall(path=str(tmp_dir))
+        # Files are in tmp_dir/scripts/ — point source_dir there
+        source_dir = tmp_dir / "scripts"
+        if not source_dir.is_dir():
+            print(f"  ERROR: no scripts/ directory in tag '{args.tag}'", file=sys.stderr)
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            return 1
+        # Copy index.html from k8s/ subdir to source_dir for local_file_path() resolution
+        tag_index = source_dir / "k8s" / "index.html"
+        if tag_index.exists():
+            shutil.copy2(str(tag_index), str(source_dir / "index.html"))
+        tag_commit = subprocess.run(
+            ["git", "log", "--oneline", "-1", args.tag],
+            cwd=str(git_root), capture_output=True, text=True,
+        ).stdout.strip()
+        print(f"  Tag '{args.tag}' -> {tag_commit}")
+        print(f"  Source dir: {source_dir}")
+
+    elif args.github:
         # Fetch stable from GitHub kosh branch (requires gh auth)
         tmp_dir = pathlib.Path(tempfile.mkdtemp(prefix="kts-stable-"))
         print("\n=== Fetching stable from GitHub ===\n")
