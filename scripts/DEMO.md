@@ -33,7 +33,7 @@ export AGENT_NAME=${USER}-agent1
 kosh local-sandbox create --name $AGENT_NAME --model claude-opus-4-6
 
 # pwd
-# ls /Users/aslom
+# ls /Users/${USER}
 # claude
 # exit
 
@@ -65,7 +65,7 @@ exit
 
 ## === running headless agent
 
-kosh sandbox exec -n aslom-agent1 -- claude --dangerously-skip-permissions -p 'say hi from kagenti opehsell sandbox'
+kosh sandbox exec -n  $AGENT_NAME -- claude --dangerously-skip-permissions -p 'say hi from kagenti opehsell sandbox'
 
 
 
@@ -89,7 +89,7 @@ exit
 
 ## === running headless agent
 
-kosh sandbox exec -n aslom-agent1 -- claude --dangerously-skip-permissions -p 'run /kwiki cli query skill for Kagenti form wiki running at https://wiki-memory-service-team1.apps.ykt1.hcp.res.ibm.com/'
+kosh sandbox exec -n $AGENT_NAME -- claude --dangerously-skip-permissions -p 'run /kwiki cli query skill for Kagenti form wiki running at https://wiki-memory-service-team1.apps.ykt1.hcp.res.ibm.com/'
 
 
 ## Using Kagenti from CLI. deploy agents and tools
