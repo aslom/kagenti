@@ -106,6 +106,7 @@ def _diagnose_start_failure(port: int, control_port: int, upstream: str, no_auth
     """Analyze rossocortex startup failure and print root cause."""
     import os
     print(f"\n--- Diagnosis ---", file=sys.stderr)
+    print(f"  {_config_dir_note()}", file=sys.stderr)
 
     if output.strip():
         print(f"Process output:", file=sys.stderr)
@@ -265,6 +266,17 @@ def _ensure_authbridge_config(budget: float) -> bool:
 CREDENTIAL_NAMES = ("LITELLM_API_KEY", "ROSSOCORTEX_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY")
 
 
+def _config_dir_note() -> str:
+    """Describe the active config dir and which override (if any) selected it."""
+    if os.environ.get("ROSSOCORTEX_CONFIG_DIR"):
+        src = "ROSSOCORTEX_CONFIG_DIR override active"
+    elif os.environ.get("XDG_CONFIG_HOME"):
+        src = "XDG_CONFIG_HOME override active"
+    else:
+        src = "default (~/.config)"
+    return f"Config dir: {CONFIG_DIR}  [{src}]"
+
+
 def _find_credential() -> tuple[str, str] | None:
     """Return (source, name) of the first available LiteLLM credential, or None.
 
@@ -294,6 +306,7 @@ def _check_credential_prereq() -> bool:
     key_file = creds_dir / "LITELLM_API_KEY"
     print("ERROR: No LiteLLM API key found — rossocortex has no credential to inject.", file=sys.stderr)
     print("  rossocortex proxies to LiteLLM and must hold a valid virtual key.", file=sys.stderr)
+    print(f"  {_config_dir_note()}", file=sys.stderr)
     print("  Provide one of the following (checked in this order):", file=sys.stderr)
     print("    1. A credential file (recommended, persists across restarts):", file=sys.stderr)
     print(f"         mkdir -p {creds_dir}", file=sys.stderr)
@@ -305,19 +318,116 @@ def _check_credential_prereq() -> bool:
     return False
 
 
+def _print_upstream_missing(env_hint: str):
+    """Print an actionable message when no upstream LiteLLM URL is configured."""
+    print("ERROR: No upstream LiteLLM URL configured.", file=sys.stderr)
+    print("  rossocortex is a proxy — it forwards every request to a LiteLLM instance,", file=sys.stderr)
+    print("  so it needs to know where that instance lives.", file=sys.stderr)
+    print(f"  {_config_dir_note()}", file=sys.stderr)
+    print("  Provide one of the following:", file=sys.stderr)
+    print("    1. Pass it on the command line:", file=sys.stderr)
+    print("         ./rossoctlx.py start --upstream https://your-litellm.example.com", file=sys.stderr)
+    print(f"    2. Set an environment variable ({env_hint}):", file=sys.stderr)
+    print("         export ROSSOCORTEX_UPSTREAM=https://your-litellm.example.com", file=sys.stderr)
+    print("  Example (this cluster's LiteLLM):", file=sys.stderr)
+    print("         export ROSSOCORTEX_UPSTREAM=https://ete-litellm.ai-models.vpc-int.res.ibm.com", file=sys.stderr)
+
+
+def _summary_lines(control_url: str) -> list[str]:
+    """Build a concise summary: version, status, budget, authbridge, agents.
+
+    Queries the running server's control API for live version/budget; falls back
+    to the saved state file when the control API is unreachable.
+    """
+    data = None
+    try:
+        resp = httpx.get(f"{control_url}/version", timeout=3.0)
+        if resp.status_code == 200:
+            data = resp.json()
+    except Exception:
+        data = None
+
+    state = _load_state()
+    label = _runtime_label()
+    lines = []
+
+    if data:
+        lines.append(f"rossocortex {data.get('rossocortex_version', '?')} — running "
+                     f"({label}, pid={data.get('pid', '?')}, mode={data.get('mode', '?')})")
+        lines.append(f"  upstream:   {data.get('upstream', '?')}")
+        b = data.get("budget", {})
+        lines.append(f"  budget:     ${b.get('spent_today', 0):.4f} / ${b.get('daily_limit', 0):.2f} "
+                     f"({b.get('calls_today', 0)} calls today)")
+        ab = data.get("authbridge")
+        if ab:
+            commit = ab.get("commit") or "?"
+            origin = " ".join(x for x in (ab.get("repo"), ab.get("branch")) if x)
+            line = f"  authbridge: {commit}"
+            if origin:
+                line += f" ({origin})"
+            line += f" — {len(ab.get('plugins', []))} plugins"
+            lines.append(line)
+        else:
+            lines.append("  authbridge: not active (direct mode)")
+    else:
+        lines.append(f"rossocortex — {label}, pid={state.get('pid', '?')}, mode={state.get('mode', '?')}")
+        lines.append(f"  upstream:   {state.get('upstream', '?')}")
+        lines.append(f"  budget:     ${state.get('budget', '?')}/day")
+        if state.get("authbridge"):
+            lines.append(f"  authbridge: {state['authbridge']}")
+
+    lines.append(f"  control:    {control_url}")
+    lines.append(f"  {_config_dir_note()}")
+
+    agents = _load_agents().get("agents", {})
+    if agents:
+        lines.append(f"  agents ({len(agents)}):")
+        for name, info in agents.items():
+            spend = _load_agent_spend(name)
+            spent = spend.get("total_spend", 0.0)
+            calls = spend.get("total_calls", 0)
+            ab_budget = info.get("budget")
+            bstr = f"${ab_budget:.2f}" if ab_budget else "unlimited"
+            lines.append(f"    - {name}: ${spent:.4f} / {bstr} ({calls} calls)")
+    else:
+        lines.append("  agents:     none registered")
+    return lines
+
+
+def _emit_summary(title: str, control_url: str, echo: bool = True, to_log: bool = True):
+    """Write a titled summary block to the request log and/or echo it to stdout."""
+    lines = _summary_lines(control_url)
+    if to_log:
+        ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        block = [f"===== {title} @ {ts} =====", *lines, "=" * 42]
+        log_file = _log_file()
+        try:
+            log_file.parent.mkdir(parents=True, exist_ok=True)
+            with log_file.open("a") as f:
+                f.write("\n".join(block) + "\n")
+        except OSError:
+            pass
+    if echo:
+        print(f"# {title}")
+        for line in lines:
+            print(line)
+
+
 def cmd_start(port: int, control_port: int, upstream: str, budget: float, no_authbridge: bool):
     """Start rossocortex as a background daemon."""
     pid = _is_running()
     if pid:
         state = _load_state()
+        cp = state.get("control_port", control_port)
         print(f"rossocortex already running (pid={pid}, port={state.get('port', '?')})")
+        _emit_summary("rossocortex already running", f"http://localhost:{cp}", echo=True, to_log=False)
         return
 
     if not upstream:
         import os
         upstream = os.environ.get("ROSSOCORTEX_UPSTREAM") or os.environ.get("ANTHROPIC_BASE_URL") or ""
     if not upstream:
-        print("ERROR: --upstream required (or set ROSSOCORTEX_UPSTREAM / ANTHROPIC_BASE_URL)", file=sys.stderr)
+        _print_upstream_missing("ROSSOCORTEX_UPSTREAM or ANTHROPIC_BASE_URL")
         sys.exit(1)
 
     if not _check_credential_prereq():
@@ -330,6 +440,7 @@ def cmd_start(port: int, control_port: int, upstream: str, budget: float, no_aut
             for p in (port, control_port):
                 if not _port_is_free(p):
                     _show_port_owner(p)
+            print(f"  {_config_dir_note()}", file=sys.stderr)
             sys.exit(1)
         port, control_port = free[0], free[1]
         print(f"Ports in use, using: proxy={port}, control={control_port}")
@@ -395,14 +506,8 @@ def cmd_start(port: int, control_port: int, upstream: str, budget: float, no_aut
                 config_dir=str(config_dir),
                 authbridge=authbridge_info,
                 command=' '.join(cmd))
-    _print_banner()
-
-    log_file = _log_file()
-    if log_file.exists():
-        recent = log_file.read_text().splitlines()[-10:]
-        if recent:
-            for line in recent:
-                print(line)
+    _emit_summary("rossocortex started", f"http://localhost:{control_port}", echo=True, to_log=True)
+    print(f"  Use: {sys.argv[0]} log -f")
 
 
 CONTAINER_NAME = "rossocortex"
@@ -426,6 +531,7 @@ def cmd_start_container(port: int, control_port: int, upstream: str, budget: flo
     runtime = _find_container_runtime()
     if not runtime:
         print("ERROR: docker or podman required for --container mode", file=sys.stderr)
+        print(f"  {_config_dir_note()}", file=sys.stderr)
         sys.exit(1)
 
     existing = sp.run([runtime, "ps", "-q", "-f", f"name={CONTAINER_NAME}"],
@@ -439,7 +545,7 @@ def cmd_start_container(port: int, control_port: int, upstream: str, budget: flo
     if not upstream:
         upstream = os.environ.get("ROSSOCORTEX_UPSTREAM") or os.environ.get("ANTHROPIC_BASE_URL") or ""
     if not upstream:
-        print("ERROR: --upstream required (or set ROSSOCORTEX_UPSTREAM)", file=sys.stderr)
+        _print_upstream_missing("ROSSOCORTEX_UPSTREAM")
         sys.exit(1)
 
     if not _check_credential_prereq():
@@ -449,6 +555,7 @@ def cmd_start_container(port: int, control_port: int, upstream: str, budget: flo
         free = _find_free_port(port, 2)
         if len(free) < 2:
             print(f"ERROR: Cannot find free ports near {port}", file=sys.stderr)
+            print(f"  {_config_dir_note()}", file=sys.stderr)
             sys.exit(1)
         port, control_port = free[0], free[1]
         print(f"Ports in use, using: proxy={port}, control={control_port}")
@@ -489,6 +596,7 @@ def cmd_start_container(port: int, control_port: int, upstream: str, budget: flo
     if result.returncode != 0:
         print(f"ERROR: container start failed", file=sys.stderr)
         print(result.stderr, file=sys.stderr)
+        print(f"  {_config_dir_note()}", file=sys.stderr)
         sys.exit(1)
 
     container_id = result.stdout.strip()[:12]
@@ -502,6 +610,7 @@ def cmd_start_container(port: int, control_port: int, upstream: str, budget: flo
         logs = sp.run([runtime, "logs", CONTAINER_NAME], capture_output=True, text=True)
         print(logs.stdout[-500:] if logs.stdout else "", file=sys.stderr)
         print(logs.stderr[-500:] if logs.stderr else "", file=sys.stderr)
+        print(f"  {_config_dir_note()}", file=sys.stderr)
         sys.exit(1)
 
     docker_cmd = ' '.join(cmd)
@@ -515,19 +624,20 @@ def cmd_start_container(port: int, control_port: int, upstream: str, budget: flo
                 config_dir=str(config_dir))
     PID_FILE.write_text(f"container:{container_id}")
 
-    _print_banner()
-
-    log_file = _log_file()
-    if log_file.exists():
-        recent = log_file.read_text().splitlines()[-10:]
-        if recent:
-            for line in recent:
-                print(line)
+    _emit_summary("rossocortex started", f"http://localhost:{control_port}", echo=True, to_log=True)
+    print(f"  Use: {sys.argv[0]} log -f")
 
 
 def cmd_stop():
     """Stop running rossocortex daemon or container."""
     import subprocess as sp
+
+    # Log a final summary while the server is still up (captures live version/agents).
+    pre_state = _load_state()
+    pre_cp = pre_state.get("control_port")
+    if pre_cp:
+        _emit_summary("rossocortex stopping", f"http://localhost:{pre_cp}", echo=False, to_log=True)
+
     stopped = False
 
     runtime = _find_container_runtime()
