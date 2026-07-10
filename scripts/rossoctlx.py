@@ -347,16 +347,14 @@ def cmd_start(port: int, control_port: int, upstream: str, budget: float, no_aut
                 config_dir=str(config_dir),
                 authbridge=authbridge_info,
                 command=' '.join(cmd))
-    print(f"rossocortex started (pid={proc.pid}, port={port}, mode={mode})")
-    print(f"  Upstream:   {upstream}")
-    print(f"  Budget:     ${budget:.2f}/day")
-    print(f"  Control:    http://localhost:{control_port}/version")
-    if cred_files:
-        print(f"  Credentials: {cred_names}")
-    if authbridge_info:
-        print(f"  AuthBridge:  {authbridge_info}")
-    if ca_cert.exists():
-        print(f"  CA cert:    {ca_cert}")
+    _print_banner()
+
+    log_file = _log_file()
+    if log_file.exists():
+        recent = log_file.read_text().splitlines()[-10:]
+        if recent:
+            for line in recent:
+                print(line)
 
 
 CONTAINER_NAME = "rossocortex"
@@ -364,6 +362,9 @@ CONTAINER_NAME = "rossocortex"
 
 def _find_container_runtime() -> str | None:
     import shutil
+    preferred = os.environ.get("ROSSOCORTEX_RUNTIME", "")
+    if preferred and shutil.which(preferred):
+        return preferred
     for cmd in ("docker", "podman"):
         if shutil.which(cmd):
             return cmd
@@ -463,26 +464,14 @@ def cmd_start_container(port: int, control_port: int, upstream: str, budget: flo
                 config_dir=str(config_dir))
     PID_FILE.write_text(f"container:{container_id}")
 
-    control_url = f"http://localhost:{control_port}"
-    try:
-        resp = httpx.get(f"{control_url}/version", timeout=5.0)
-        data = resp.json()
-        print(f"rossocortex started (container={container_id}, port={port}, mode=container)")
-        print(f"  Image:      {image}")
-        print(f"  Upstream:   {data.get('upstream', upstream)}")
-        print(f"  Budget:     ${data.get('budget', {}).get('daily_limit', budget):.2f}/day")
-        print(f"  Control:    {control_url}/version")
-    except Exception:
-        print(f"rossocortex started (container={container_id}, port={port}, mode=container)")
-        print(f"  Image:      {image}")
-        print(f"  Upstream:   {upstream}")
-        print(f"  Budget:     ${budget:.2f}/day")
-        print(f"  Control:    {control_url}/version (not yet responding)")
+    _print_banner()
 
-    print(f"  Credentials: {', '.join(f.name for f in sorted(creds_dir.iterdir())) if creds_dir.exists() else 'none'}")
-    ca_cert = ca_dir / "tls.crt"
-    if ca_cert.exists():
-        print(f"  CA cert:    {ca_cert}")
+    log_file = _log_file()
+    if log_file.exists():
+        recent = log_file.read_text().splitlines()[-10:]
+        if recent:
+            for line in recent:
+                print(line)
 
 
 def cmd_stop():
@@ -510,7 +499,11 @@ def cmd_stop():
             pass
 
     PID_FILE.unlink(missing_ok=True)
-    STATE_FILE.unlink(missing_ok=True)
+    state = _load_state()
+    if state:
+        state["pid"] = 0
+        state["mode"] = "stopped"
+        STATE_FILE.write_text(json.dumps(state, indent=2) + "\n")
 
     if not stopped:
         print("rossocortex is not running")
@@ -933,6 +926,40 @@ def _log_file() -> Path:
     return config / "rossocortex.log"
 
 
+def _print_banner():
+    """Print compact status: version, upstream, budget, agents (< 10 lines)."""
+    state = _load_state()
+    mode = state.get("mode", "?")
+    port = state.get("port", "?")
+    pid = state.get("pid", "?")
+    upstream = state.get("upstream", "?")
+    budget = state.get("budget", "?")
+    image = state.get("image", "")
+    runtime_env = os.environ.get("ROSSOCORTEX_RUNTIME", "")
+    runtime_flag = f" --runtime={runtime_env}" if runtime_env else ""
+    me = sys.argv[0]
+
+    print(f"rossocortex (pid={pid}, port={port}, mode={mode})")
+    if image:
+        print(f"  image={image}  upstream={upstream}  budget=${budget}/day")
+    else:
+        print(f"  upstream={upstream}  budget=${budget}/day")
+
+    data = _load_agents()
+    agents = data.get("agents", {})
+    if agents:
+        parts = []
+        for name, info in agents.items():
+            spend_data = _load_agent_spend(name)
+            spent = spend_data.get("total_spend", 0.0)
+            ab = info.get("budget")
+            b = f"${ab:.0f}" if ab else "unlimited"
+            parts.append(f"{name}(${spent:.2f}/{b})")
+        print(f"  agents: {', '.join(parts)}")
+
+    print(f"  Use: {me}{runtime_flag} log -f")
+
+
 def _ensure_running() -> bool:
     """Ensure rossocortex is running. Start it if not. Returns True if running."""
     pid = _is_running()
@@ -954,9 +981,10 @@ def _ensure_running() -> bool:
         except httpx.ConnectError:
             pass
 
-    upstream = os.environ.get("ROSSOCORTEX_UPSTREAM") or os.environ.get("ANTHROPIC_BASE_URL") or ""
+    upstream = os.environ.get("ROSSOCORTEX_UPSTREAM") or os.environ.get("ANTHROPIC_BASE_URL") or state.get("upstream") or ""
     if not upstream:
         print("rossocortex is not running and no ROSSOCORTEX_UPSTREAM set — cannot auto-start.", file=sys.stderr)
+        print("  Fix: export ROSSOCORTEX_UPSTREAM=https://your-litellm-proxy.example.com", file=sys.stderr)
         return False
     local_dir = os.environ.get("ROSSOCORTEX_CONTAINER_LOCAL_DIR")
     if local_dir:
@@ -973,8 +1001,7 @@ def cmd_log(follow: bool = False, lines: int = 20, agent_filter: str | None = No
     if not _ensure_running():
         return
 
-    state = _load_state()
-    print(f"rossocortex (pid={state.get('pid','?')}, port={state.get('port','?')}, mode={state.get('mode','?')})")
+    _print_banner()
 
     log_file = _log_file()
     if not log_file.exists():
@@ -985,7 +1012,7 @@ def cmd_log(follow: bool = False, lines: int = 20, agent_filter: str | None = No
         import subprocess as sp
         cmd = ["tail", "-f", str(log_file)]
         if agent_filter:
-            print(f"Following log (filter: agent={agent_filter})...")
+            print(f"Following (filter: agent={agent_filter})...")
             try:
                 proc = sp.Popen(cmd, stdout=sp.PIPE, text=True)
                 for line in proc.stdout:
@@ -994,7 +1021,6 @@ def cmd_log(follow: bool = False, lines: int = 20, agent_filter: str | None = No
             except KeyboardInterrupt:
                 proc.terminate()
         else:
-            print(f"Following log...")
             try:
                 sp.run(cmd)
             except KeyboardInterrupt:
@@ -1014,6 +1040,7 @@ def cmd_log(follow: bool = False, lines: int = 20, agent_filter: str | None = No
 def main():
     parser = argparse.ArgumentParser(description="rossoctlx — manage a running rossocortex proxy")
     parser.add_argument("--control-url", default=DEFAULT_CONTROL_URL, help="Rossocortex control API URL")
+    parser.add_argument("--runtime", choices=["docker", "podman"], default=None, help="Container runtime (default: auto-detect, or ROSSOCORTEX_RUNTIME env)")
     subparsers = parser.add_subparsers(dest="command")
 
     subparsers.add_parser("version", help="Show version and status of running rossocortex")
@@ -1055,6 +1082,9 @@ def main():
     if not args.command:
         parser.print_help()
         sys.exit(1)
+
+    if args.runtime:
+        os.environ["ROSSOCORTEX_RUNTIME"] = args.runtime
 
     control_url = args.control_url
     if control_url == DEFAULT_CONTROL_URL:
