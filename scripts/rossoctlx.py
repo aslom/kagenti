@@ -260,6 +260,51 @@ def _ensure_authbridge_config(budget: float) -> bool:
     return ca_cert.exists()
 
 
+# Credential names in priority order (files checked first, then env vars).
+# Mirrors rossocortex.py's credential lookup order.
+CREDENTIAL_NAMES = ("LITELLM_API_KEY", "ROSSOCORTEX_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY")
+
+
+def _find_credential() -> tuple[str, str] | None:
+    """Return (source, name) of the first available LiteLLM credential, or None.
+
+    Checks credential files in CONFIG_DIR/credentials first, then environment
+    variables, following the same priority order rossocortex uses at runtime.
+    """
+    creds_dir = CONFIG_DIR / "credentials"
+    for name in CREDENTIAL_NAMES:
+        f = creds_dir / name
+        try:
+            if f.exists() and f.read_text().strip():
+                return (f"file {f}", name)
+        except OSError:
+            pass
+    for name in CREDENTIAL_NAMES:
+        if os.environ.get(name, "").strip():
+            return (f"env ${name}", name)
+    return None
+
+
+def _check_credential_prereq() -> bool:
+    """Verify a LiteLLM API key is available. Print an actionable message if not."""
+    found = _find_credential()
+    if found:
+        return True
+    creds_dir = CONFIG_DIR / "credentials"
+    key_file = creds_dir / "LITELLM_API_KEY"
+    print("ERROR: No LiteLLM API key found — rossocortex has no credential to inject.", file=sys.stderr)
+    print("  rossocortex proxies to LiteLLM and must hold a valid virtual key.", file=sys.stderr)
+    print("  Provide one of the following (checked in this order):", file=sys.stderr)
+    print("    1. A credential file (recommended, persists across restarts):", file=sys.stderr)
+    print(f"         mkdir -p {creds_dir}", file=sys.stderr)
+    print(f"         printf '%s' 'sk-your-litellm-key' > {key_file}", file=sys.stderr)
+    print(f"         chmod 600 {key_file}", file=sys.stderr)
+    print("    2. An environment variable (auto-saved to the credential file on first start):", file=sys.stderr)
+    print("         export ANTHROPIC_AUTH_TOKEN=sk-your-litellm-key", file=sys.stderr)
+    print("  Note: use a LiteLLM virtual key, NOT a raw provider key (e.g. sk-ant-...).", file=sys.stderr)
+    return False
+
+
 def cmd_start(port: int, control_port: int, upstream: str, budget: float, no_authbridge: bool):
     """Start rossocortex as a background daemon."""
     pid = _is_running()
@@ -273,6 +318,9 @@ def cmd_start(port: int, control_port: int, upstream: str, budget: float, no_aut
         upstream = os.environ.get("ROSSOCORTEX_UPSTREAM") or os.environ.get("ANTHROPIC_BASE_URL") or ""
     if not upstream:
         print("ERROR: --upstream required (or set ROSSOCORTEX_UPSTREAM / ANTHROPIC_BASE_URL)", file=sys.stderr)
+        sys.exit(1)
+
+    if not _check_credential_prereq():
         sys.exit(1)
 
     if not _port_is_free(port) or not _port_is_free(control_port):
@@ -392,6 +440,9 @@ def cmd_start_container(port: int, control_port: int, upstream: str, budget: flo
         upstream = os.environ.get("ROSSOCORTEX_UPSTREAM") or os.environ.get("ANTHROPIC_BASE_URL") or ""
     if not upstream:
         print("ERROR: --upstream required (or set ROSSOCORTEX_UPSTREAM)", file=sys.stderr)
+        sys.exit(1)
+
+    if not _check_credential_prereq():
         sys.exit(1)
 
     if not _port_is_free(port) or not _port_is_free(control_port):
