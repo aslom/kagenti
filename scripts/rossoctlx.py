@@ -1010,6 +1010,10 @@ def cmd_log(follow: bool = False, lines: int = 20, agent_filter: str | None = No
 
     if follow:
         import subprocess as sp
+        sys.stdout.flush()
+        if log_file.stat().st_size == 0:
+            print("(waiting for first log entry...)")
+            sys.stdout.flush()
         cmd = ["tail", "-f", str(log_file)]
         if agent_filter:
             print(f"Following (filter: agent={agent_filter})...")
@@ -1054,6 +1058,7 @@ def main():
     start_parser.add_argument("--local", action="store_true", help="Run locally (uses ROSSOCORTEX_CONTAINER_LOCAL_DIR or rossocortex-container/)")
     start_parser.add_argument("--no-authbridge", action="store_true", help="Direct mode without AuthBridge (local only)")
     start_parser.add_argument("--image", default="quay.io/aslomnet/rosscortex:latest", help="Container image (default mode)")
+    start_parser.add_argument("--log-follow", "-f", action="store_true", dest="log_follow", help="After starting, follow the log (like 'start' then 'log -f')")
 
     subparsers.add_parser("stop", help="Stop running rossocortex daemon")
 
@@ -1115,6 +1120,8 @@ def main():
             cmd_start(args.port, args.control_port, args.upstream, args.budget, args.no_authbridge)
         else:
             cmd_start_container(args.port, args.control_port, args.upstream, args.budget, args.image)
+        if args.log_follow:
+            cmd_log(follow=True, lines=20, agent_filter=None)
     elif args.command == "stop":
         cmd_stop()
     elif args.command in ("log", "logs"):

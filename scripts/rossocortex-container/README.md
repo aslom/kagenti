@@ -134,20 +134,43 @@ pipeline:
 - **Dynamic port allocation**: No port conflicts even with multiple instances
 - **Agent management CLI**: Register, update, delete, list agents with copy-pasteable config
 
+## Prerequisites
+
+1. **LiteLLM virtual key** — rossocortex proxies to a LiteLLM instance. Make sure ANTHROPIC_AUTH_TOKEN environment variables is available (saved automatically in config file on first start):
+   ```bash
+   export ANTHROPIC_AUTH_TOKEN=sk-your-litellm-key
+   ```
+
+2. **Docker or Podman** — for container mode (default). Force one with `--runtime=podman`.
+
+## Getting the Code
+
+The `rossoctlx` branch lives on the `aslom` fork, not the upstream org repo:
+
+```bash
+git remote add aslom https://github.com/aslom/kagenti.git  # skip if already added
+git fetch aslom rossoctlx
+git checkout -B rossoctlx aslom/rossoctlx
+```
+
 ## Running
 
 ### Container (default)
 
 ```bash
 rossoctlx.py start --upstream https://litellm.example.com
+# Or force podman:
+rossoctlx.py --runtime=podman start --upstream https://litellm.example.com
 ```
 
 Pulls `quay.io/aslomnet/rosscortex:latest`, mounts `~/.config/rossocortex` for persistence.
+Never copy the printed `docker run` command — it contains expanded absolute paths specific
+to the current machine. Always use `rossoctlx.py start`.
 
 ### Local
 
 ```bash
-export ROSSOCORTEX_CONTAINER_LOCAL_DIR=/path/to/rossocortex-container
+export ROSSOCORTEX_CONTAINER_LOCAL_DIR=/path/to/kagenti/scripts/rossocortex-container
 rossoctlx.py start --local --upstream https://litellm.example.com
 ```
 
