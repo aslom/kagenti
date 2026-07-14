@@ -36,6 +36,53 @@ ROSSOCORTEX_SCRIPT = ROSSOCORTEX_CONTAINER_DIR / "rossocortex.py"
 PID_FILE = CONFIG_DIR / "rossocortex.pid"
 STATE_FILE = CONFIG_DIR / "rossocortex-state.json"
 
+# Fallback copy of rossocortex-container/templates/config.yaml.j2, used when the
+# on-disk template is not present (e.g. installed as a standalone pip package with
+# only rossoctlx.py shipped). Keep in sync with the file in rossocortex-container/.
+EMBEDDED_AGENT_CONFIG_TEMPLATE = """\
+mode: proxy-sidecar
+
+listener:
+  reverse_proxy_addr: ":{{ reverse_proxy_port }}"
+  forward_proxy_addr: "0.0.0.0:{{ port }}"
+  transparent_proxy_addr: ":{{ transparent_port }}"
+  reverse_proxy_backend: "http://127.0.0.1:1"
+  session_api_addr: ":{{ session_port }}"
+
+tls_bridge:
+  mode: enabled
+  ca_dir: {{ ca_dir }}
+  ports: [443]
+
+session:
+  enabled: true
+
+stats:
+  address: ":{{ stats_port }}"
+
+pipeline:
+  outbound:
+    plugins:
+      - name: placeholder-resolve
+        config:
+          source: secret_dir
+          secret_dir: {{ credentials_dir }}
+{% if inference_parser %}
+      - name: inference-parser
+{% endif %}
+{% if mcp_parser %}
+      - name: mcp-parser
+{% endif %}
+  inbound:
+    plugins:
+{% if budget_track %}
+      - name: litellm-budget-track
+        config:
+          spend_file: {{ spend_file }}
+          max_budget: {{ max_budget }}
+{% endif %}
+"""
+
 
 def _is_running() -> int | str | None:
     """Return PID (int) or container ID (str) if rossocortex is running, None otherwise."""
@@ -834,13 +881,18 @@ def _generate_agent_config(agent_name: str, ports: dict, budget: float | None, c
     config_file = agent_dir / "config.yaml"
 
     try:
-        from jinja2 import Environment, FileSystemLoader
+        from jinja2 import Environment, FileSystemLoader, Template
     except ImportError:
         print("ERROR: jinja2 required for config generation. Install: pip install jinja2", file=sys.stderr)
         sys.exit(1)
 
-    env = Environment(loader=FileSystemLoader(str(TEMPLATES_DIR)))
-    template = env.get_template("config.yaml.j2")
+    template_file = TEMPLATES_DIR / "config.yaml.j2"
+    if template_file.exists():
+        env = Environment(loader=FileSystemLoader(str(TEMPLATES_DIR)))
+        template = env.get_template("config.yaml.j2")
+    else:
+        # No on-disk template (e.g. pip-installed standalone) — use embedded copy.
+        template = Template(EMBEDDED_AGENT_CONFIG_TEMPLATE)
     rendered = template.render(
         port=ports["forward"],
         reverse_proxy_port=ports["reverse"],
