@@ -21,6 +21,7 @@ from pathlib import Path
 
 import httpx
 
+ROSSOCTL_VERSION = "0.1.0"  # keep in sync with scripts/pyproject.toml [project].version
 DEFAULT_CONTROL_URL = "http://localhost:8181"
 DEFAULT_PROXY_PORT = 8185
 _xdg_config = os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))
@@ -460,6 +461,16 @@ def _emit_summary(title: str, control_url: str, echo: bool = True, to_log: bool 
             print(line)
 
 
+def _print_next_steps():
+    """Print a concise 'what to do next' block after a successful start."""
+    me = sys.argv[0]
+    print("\nNext steps:")
+    print(f"  {me} status                      # check the proxy is healthy")
+    print(f"  {me} agent my-agent --budget=5   # register an agent, get its proxy creds")
+    print(f"  {me} agents                      # list registered agents")
+    print(f"  {me} log -f                      # follow the request log")
+
+
 def cmd_start(port: int, control_port: int, upstream: str, budget: float, no_authbridge: bool):
     """Start rossocortex as a background daemon."""
     pid = _is_running()
@@ -554,7 +565,7 @@ def cmd_start(port: int, control_port: int, upstream: str, budget: float, no_aut
                 authbridge=authbridge_info,
                 command=' '.join(cmd))
     _emit_summary("rossocortex started", f"http://localhost:{control_port}", echo=True, to_log=True)
-    print(f"  Use: {sys.argv[0]} log -f")
+    _print_next_steps()
 
 
 CONTAINER_NAME = "rossocortex"
@@ -672,7 +683,7 @@ def cmd_start_container(port: int, control_port: int, upstream: str, budget: flo
     PID_FILE.write_text(f"container:{container_id}")
 
     _emit_summary("rossocortex started", f"http://localhost:{control_port}", echo=True, to_log=True)
-    print(f"  Use: {sys.argv[0]} log -f")
+    _print_next_steps()
 
 
 def cmd_stop():
@@ -775,11 +786,14 @@ def cmd_status(control_url: str):
 
 
 def cmd_version(control_url: str):
+    # Always print the client version first so it's answerable in bug reports even
+    # when no server is running.
+    print(f"rossoctl {ROSSOCTL_VERSION} (client)\n")
     try:
         resp = httpx.get(f"{control_url}/version", timeout=5.0)
     except httpx.ConnectError:
-        print(f"ERROR: Cannot connect to rossocortex at {control_url}", file=sys.stderr)
-        print(f"  Is rossocortex.py running?", file=sys.stderr)
+        print(f"Server: not running (cannot connect to {control_url})", file=sys.stderr)
+        print(f"  Start one with: rossoctl start --upstream <URL>", file=sys.stderr)
         sys.exit(1)
 
     if resp.status_code != 200:
@@ -1254,14 +1268,163 @@ def cmd_log(follow: bool = False, lines: int = 20, agent_filter: str | None = No
         print(line)
 
 
+def _norm_arch(m: str) -> str:
+    m = (m or "").lower()
+    if m in ("arm64", "aarch64"):
+        return "arm64"
+    if m in ("x86_64", "amd64"):
+        return "amd64"
+    return m
+
+
+def _daemon_ok(runtime: str) -> bool:
+    import subprocess as sp
+    try:
+        return sp.run([runtime, "info"], capture_output=True, timeout=10).returncode == 0
+    except (OSError, sp.TimeoutExpired):
+        return False
+
+
+def _dir_writable(path: Path) -> bool:
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        probe = path / ".doctor-write-test"
+        probe.write_text("ok")
+        probe.unlink()
+        return True
+    except OSError:
+        return False
+
+
+def cmd_doctor(args):
+    """Offline environment preflight — pass/fail with remediation. Exits non-zero on failure."""
+    import platform
+    import shutil
+    import subprocess as sp
+
+    print("rossoctl doctor — environment preflight\n")
+    results = []  # (ok: True|False|None, name, detail, fix)   None => warning (non-fatal)
+
+    def add(ok, name, detail="", fix=""):
+        results.append((ok, name, detail, fix))
+
+    # Python
+    add(sys.version_info >= (3, 11), "Python >= 3.11", f"found {sys.version.split()[0]}",
+        "install Python 3.11+ (install guide §2)")
+
+    # git — install-time dependency (pip/pipx fetch from a Git repo)
+    git = shutil.which("git")
+    add(True if git else None, "git on PATH", git or "not found",
+        "git is needed to (re)install from the Git repo — install git (install guide §3)")
+
+    # rossoctl itself resolvable on PATH
+    rx = shutil.which("rossoctl")
+    add(True if rx else None, "rossoctl on PATH", rx or "not found (running via script?)",
+        "if installed with pipx: run 'pipx ensurepath' and open a new terminal")
+
+    # container runtime + daemon health
+    runtime = _find_container_runtime()
+    if runtime:
+        up = _daemon_ok(runtime)
+        add(up, f"container runtime ({runtime})",
+            "daemon responding" if up else "installed but daemon NOT responding",
+            "start Docker Desktop, or `sudo systemctl start docker` / `systemctl --user start podman`")
+    else:
+        add(None if args.local else False, "container runtime (docker/podman)", "none on PATH",
+            "install docker or podman for container mode (install guide §6) — or use --local")
+
+    # architecture vs image
+    host = _norm_arch(platform.machine())
+    img = args.image
+    img_arch = None
+    if runtime:
+        try:
+            r = sp.run([runtime, "image", "inspect", img, "--format", "{{.Architecture}}"],
+                       capture_output=True, text=True, timeout=10)
+            if r.returncode == 0:
+                img_arch = _norm_arch(r.stdout.strip())
+        except (OSError, sp.TimeoutExpired):
+            pass
+    if img_arch:
+        add(img_arch == host, f"image arch matches host ({host})", f"{img} is {img_arch}",
+            "build a native image (rossocortex-container/REPRODUCE.md) and pass --image")
+    elif img.startswith("quay.io/aslomnet/rosscortex") and host != "arm64":
+        add(None, f"image arch vs host ({host})", "default image is linux/arm64-only, not yet pulled",
+            f"on {host} build a native image (REPRODUCE.md) and pass --image")
+
+    # credential
+    cred = _find_credential()
+    add(bool(cred), "LiteLLM/LLM API key", cred[0] if cred else "none found",
+        f"set one of {', '.join(CREDENTIAL_NAMES)} (file in {CONFIG_DIR / 'credentials'} or env)")
+
+    # upstream
+    upstream = (os.environ.get("ROSSOCORTEX_UPSTREAM") or os.environ.get("ANTHROPIC_BASE_URL")
+                or _load_state().get("upstream"))
+    add(True if upstream else None, "upstream LLM URL", upstream or "not set",
+        "pass --upstream <URL> or export ROSSOCORTEX_UPSTREAM")
+
+    # config dir writable
+    add(_dir_writable(CONFIG_DIR), "config dir writable", _config_dir_note(),
+        f"ensure {CONFIG_DIR} is writable")
+
+    # default ports
+    p_free, c_free = _port_is_free(DEFAULT_PROXY_PORT), _port_is_free(DEFAULT_PROXY_PORT + 1)
+    add(True if (p_free and c_free) else None, "default ports free",
+        f"proxy {DEFAULT_PROXY_PORT} {'free' if p_free else 'in use'}, "
+        f"control {DEFAULT_PROXY_PORT + 1} {'free' if c_free else 'in use'}",
+        "start auto-picks free ports if these are taken")
+
+    # native-mode prerequisites (optional)
+    if args.local:
+        uv = shutil.which("uv")
+        add(True if uv else None, "uv on PATH (--local)", uv or "not found",
+            "install uv: https://astral.sh/uv")
+        localdir = os.environ.get("ROSSOCORTEX_CONTAINER_LOCAL_DIR")
+        add(True if localdir else None, "ROSSOCORTEX_CONTAINER_LOCAL_DIR (--local)", localdir or "not set",
+            "export ROSSOCORTEX_CONTAINER_LOCAL_DIR=<checkout>/scripts/rossocortex-container")
+        add(True if ROSSOCORTEX_SCRIPT.exists() else None, "rossocortex.py present (--local)",
+            str(ROSSOCORTEX_SCRIPT) if ROSSOCORTEX_SCRIPT.exists() else "not found",
+            "not shipped in a pip install — use a source checkout for --local mode")
+    else:
+        print("  (native-mode checks skipped; pass --local to include them)\n")
+
+    fails = warns = passes = 0
+    for ok, name, detail, fix in results:
+        mark = "✓" if ok is True else ("!" if ok is None else "✗")
+        line = f"  [{mark}] {name}"
+        if detail:
+            line += f"  ({detail})"
+        print(line)
+        if ok is False:
+            fails += 1
+            if fix:
+                print(f"      fix: {fix}")
+        elif ok is None:
+            warns += 1
+            if fix:
+                print(f"      note: {fix}")
+        else:
+            passes += 1
+
+    print(f"\n{passes} passed, {warns} warnings, {fails} failed")
+    if fails == 0:
+        print("Ready. Next: rossoctl start --upstream <URL>")
+    sys.exit(1 if fails else 0)
+
+
 def main():
     parser = argparse.ArgumentParser(description="rossoctlx — manage a running rossocortex proxy")
     parser.add_argument("--control-url", default=DEFAULT_CONTROL_URL, help="Rossocortex control API URL")
     parser.add_argument("--runtime", choices=["docker", "podman"], default=None, help="Container runtime (default: auto-detect, or ROSSOCORTEX_RUNTIME env)")
+    parser.add_argument("--version", action="version", version=f"rossoctl {ROSSOCTL_VERSION}", help="Print the client version and exit")
     subparsers = parser.add_subparsers(dest="command")
 
     subparsers.add_parser("version", help="Show version and status of running rossocortex")
     subparsers.add_parser("status", help="Check if rossocortex is running")
+
+    doctor_parser = subparsers.add_parser("doctor", aliases=["preflight"], help="Check environment prerequisites (offline pass/fail)")
+    doctor_parser.add_argument("--local", action="store_true", help="Also check native (--local) mode prerequisites")
+    doctor_parser.add_argument("--image", default="quay.io/aslomnet/rosscortex:latest", help="Container image to arch-check against")
 
     start_parser = subparsers.add_parser("start", help="Start rossocortex (container by default, --local for native)")
     start_parser.add_argument("--port", type=int, default=DEFAULT_PROXY_PORT, help="Proxy listen port")
@@ -1312,6 +1475,8 @@ def main():
 
     if args.command == "status":
         cmd_status(control_url)
+    elif args.command in ("doctor", "preflight"):
+        cmd_doctor(args)
     elif args.command == "version":
         cmd_version(control_url)
     elif args.command == "start":
