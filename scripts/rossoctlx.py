@@ -1412,6 +1412,42 @@ def cmd_doctor(args):
     sys.exit(1 if fails else 0)
 
 
+def _add_start_args(p):
+    """Register the `start` flags on a parser (shared by `start` and `cortex start`)."""
+    p.add_argument("--port", type=int, default=DEFAULT_PROXY_PORT, help="Proxy listen port")
+    p.add_argument("--control-port", type=int, default=8186, help="Control API port")
+    p.add_argument("--upstream", default="", help="Upstream LiteLLM URL")
+    p.add_argument("--budget", type=float, default=5.0, help="Global daily budget in USD")
+    p.add_argument("--local", action="store_true", help="Run locally (uses ROSSOCORTEX_CONTAINER_LOCAL_DIR or rossocortex-container/)")
+    p.add_argument("--no-authbridge", action="store_true", help="Direct mode without AuthBridge (local only)")
+    p.add_argument("--image", default="quay.io/aslomnet/rosscortex:latest", help="Container image (default mode)")
+    p.add_argument("--log-follow", "-f", action="store_true", dest="log_follow", help="After starting, follow the log (like 'start' then 'log -f')")
+
+
+def _do_start(args):
+    """Run the start flow (shared by `start` and `cortex start`)."""
+    local_dir = os.environ.get("ROSSOCORTEX_CONTAINER_LOCAL_DIR", "")
+    if args.local:
+        if not local_dir:
+            print("ERROR: --local requires ROSSOCORTEX_CONTAINER_LOCAL_DIR to be set", file=sys.stderr)
+            print(f"  export ROSSOCORTEX_CONTAINER_LOCAL_DIR=/path/to/rossocortex-container", file=sys.stderr)
+            sys.exit(1)
+        local_path = Path(local_dir)
+        missing = []
+        if not (local_path / "rossocortex.py").exists():
+            missing.append("rossocortex.py")
+        if not (local_path / "templates").is_dir():
+            missing.append("templates/")
+        if missing:
+            print(f"ERROR: ROSSOCORTEX_CONTAINER_LOCAL_DIR={local_dir} is missing: {', '.join(missing)}", file=sys.stderr)
+            sys.exit(1)
+        cmd_start(args.port, args.control_port, args.upstream, args.budget, args.no_authbridge)
+    else:
+        cmd_start_container(args.port, args.control_port, args.upstream, args.budget, args.image)
+    if args.log_follow:
+        cmd_log(follow=True, lines=20, agent_filter=None)
+
+
 def main():
     parser = argparse.ArgumentParser(description="rossoctlx — manage a running rossocortex proxy")
     parser.add_argument("--control-url", default=DEFAULT_CONTROL_URL, help="Rossocortex control API URL")
@@ -1427,16 +1463,16 @@ def main():
     doctor_parser.add_argument("--image", default="quay.io/aslomnet/rosscortex:latest", help="Container image to arch-check against")
 
     start_parser = subparsers.add_parser("start", help="Start rossocortex (container by default, --local for native)")
-    start_parser.add_argument("--port", type=int, default=DEFAULT_PROXY_PORT, help="Proxy listen port")
-    start_parser.add_argument("--control-port", type=int, default=8186, help="Control API port")
-    start_parser.add_argument("--upstream", default="", help="Upstream LiteLLM URL")
-    start_parser.add_argument("--budget", type=float, default=5.0, help="Global daily budget in USD")
-    start_parser.add_argument("--local", action="store_true", help="Run locally (uses ROSSOCORTEX_CONTAINER_LOCAL_DIR or rossocortex-container/)")
-    start_parser.add_argument("--no-authbridge", action="store_true", help="Direct mode without AuthBridge (local only)")
-    start_parser.add_argument("--image", default="quay.io/aslomnet/rosscortex:latest", help="Container image (default mode)")
-    start_parser.add_argument("--log-follow", "-f", action="store_true", dest="log_follow", help="After starting, follow the log (like 'start' then 'log -f')")
+    _add_start_args(start_parser)
 
     subparsers.add_parser("stop", help="Stop running rossocortex daemon")
+
+    # `cortex` command group: `cortex start`/`cortex stop` are aliases for the
+    # top-level `start`/`stop` and run the exact same code paths.
+    cortex_parser = subparsers.add_parser("cortex", help="Manage the rossocortex proxy ('cortex start|stop' == 'start|stop')")
+    cortex_sub = cortex_parser.add_subparsers(dest="cortex_cmd")
+    _add_start_args(cortex_sub.add_parser("start", help="Alias for 'start'"))
+    cortex_sub.add_parser("stop", help="Alias for 'stop'")
 
     log_parser = subparsers.add_parser("log", aliases=["logs"], help="Show rossocortex request log")
     log_parser.add_argument("-f", "--follow", action="store_true", help="Follow log output (like tail -f)")
@@ -1480,26 +1516,16 @@ def main():
     elif args.command == "version":
         cmd_version(control_url)
     elif args.command == "start":
-        local_dir = os.environ.get("ROSSOCORTEX_CONTAINER_LOCAL_DIR", "")
-        if args.local:
-            if not local_dir:
-                print("ERROR: --local requires ROSSOCORTEX_CONTAINER_LOCAL_DIR to be set", file=sys.stderr)
-                print(f"  export ROSSOCORTEX_CONTAINER_LOCAL_DIR=/path/to/rossocortex-container", file=sys.stderr)
-                sys.exit(1)
-            local_path = Path(local_dir)
-            missing = []
-            if not (local_path / "rossocortex.py").exists():
-                missing.append("rossocortex.py")
-            if not (local_path / "templates").is_dir():
-                missing.append("templates/")
-            if missing:
-                print(f"ERROR: ROSSOCORTEX_CONTAINER_LOCAL_DIR={local_dir} is missing: {', '.join(missing)}", file=sys.stderr)
-                sys.exit(1)
-            cmd_start(args.port, args.control_port, args.upstream, args.budget, args.no_authbridge)
+        _do_start(args)
+    elif args.command == "cortex":
+        cortex_cmd = getattr(args, "cortex_cmd", None)
+        if cortex_cmd == "start":
+            _do_start(args)
+        elif cortex_cmd == "stop":
+            cmd_stop()
         else:
-            cmd_start_container(args.port, args.control_port, args.upstream, args.budget, args.image)
-        if args.log_follow:
-            cmd_log(follow=True, lines=20, agent_filter=None)
+            print("usage: rossoctlx cortex {start|stop}", file=sys.stderr)
+            sys.exit(1)
     elif args.command == "stop":
         cmd_stop()
     elif args.command in ("log", "logs"):
