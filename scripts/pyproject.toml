@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "kagenti-rossoctl"
 version = "0.1.0"
-description = "rossoctl — CLI to manage a rossocortex budget proxy"
+description = "rossoctlx — CLI to manage a rossocortex budget proxy"
 requires-python = ">=3.11"
 # PEP 723 inline deps in rossoctlx.py are ignored by pip; declare runtime deps here.
 dependencies = [
@@ -14,9 +14,9 @@ dependencies = [
 ]
 
 [project.scripts]
-# `rossoctl` shell command -> rossoctlx.py:main(). rossoctlx.py is shipped as a
+# `rossoctlx` shell command -> rossoctlx.py:main(). rossoctlx.py is shipped as a
 # top-level module (py-modules below), so the import target is just `rossoctlx`.
-rossoctl = "rossoctlx:main"
+rossoctlx = "rossoctlx:main"
 
 [tool.setuptools]
 # Ship ONLY rossoctlx.py from this directory. Setting py-modules disables

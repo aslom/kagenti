@@ -788,12 +788,12 @@ def cmd_status(control_url: str):
 def cmd_version(control_url: str):
     # Always print the client version first so it's answerable in bug reports even
     # when no server is running.
-    print(f"rossoctl {ROSSOCTL_VERSION} (client)\n")
+    print(f"rossoctlx {ROSSOCTL_VERSION} (client)\n")
     try:
         resp = httpx.get(f"{control_url}/version", timeout=5.0)
     except httpx.ConnectError:
         print(f"Server: not running (cannot connect to {control_url})", file=sys.stderr)
-        print(f"  Start one with: rossoctl start --upstream <URL>", file=sys.stderr)
+        print(f"  Start one with: rossoctlx start --upstream <URL>", file=sys.stderr)
         sys.exit(1)
 
     if resp.status_code != 200:
@@ -1302,7 +1302,7 @@ def cmd_doctor(args):
     import shutil
     import subprocess as sp
 
-    print("rossoctl doctor — environment preflight\n")
+    print("rossoctlx doctor — environment preflight\n")
     results = []  # (ok: True|False|None, name, detail, fix)   None => warning (non-fatal)
 
     def add(ok, name, detail="", fix=""):
@@ -1317,9 +1317,9 @@ def cmd_doctor(args):
     add(True if git else None, "git on PATH", git or "not found",
         "git is needed to (re)install from the Git repo — install git (install guide §3)")
 
-    # rossoctl itself resolvable on PATH
-    rx = shutil.which("rossoctl")
-    add(True if rx else None, "rossoctl on PATH", rx or "not found (running via script?)",
+    # rossoctlx itself resolvable on PATH
+    rx = shutil.which("rossoctlx")
+    add(True if rx else None, "rossoctlx on PATH", rx or "not found (running via script?)",
         "if installed with pipx: run 'pipx ensurepath' and open a new terminal")
 
     # container runtime + daemon health
@@ -1408,7 +1408,7 @@ def cmd_doctor(args):
 
     print(f"\n{passes} passed, {warns} warnings, {fails} failed")
     if fails == 0:
-        print("Ready. Next: rossoctl start --upstream <URL>")
+        print("Ready. Next: rossoctlx start --upstream <URL>")
     sys.exit(1 if fails else 0)
 
 
@@ -1416,7 +1416,7 @@ def main():
     parser = argparse.ArgumentParser(description="rossoctlx — manage a running rossocortex proxy")
     parser.add_argument("--control-url", default=DEFAULT_CONTROL_URL, help="Rossocortex control API URL")
     parser.add_argument("--runtime", choices=["docker", "podman"], default=None, help="Container runtime (default: auto-detect, or ROSSOCORTEX_RUNTIME env)")
-    parser.add_argument("--version", action="version", version=f"rossoctl {ROSSOCTL_VERSION}", help="Print the client version and exit")
+    parser.add_argument("--version", action="version", version=f"rossoctlx {ROSSOCTL_VERSION}", help="Print the client version and exit")
     subparsers = parser.add_subparsers(dest="command")
 
     subparsers.add_parser("version", help="Show version and status of running rossocortex")

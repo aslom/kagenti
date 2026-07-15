@@ -1,6 +1,6 @@
-# How to Install `rossoctl`
+# How to Install `rossoctlx`
 
-`rossoctl` is the CLI for managing a **rossocortex budget proxy** (Python package
+`rossoctlx` is the CLI for managing a **rossocortex budget proxy** (Python package
 `kagenti-rossoctl`). It manages a proxy that sits in front of an upstream LLM
 API (LiteLLM / Anthropic-compatible), enforcing per-agent daily budgets and
 issuing per-agent proxy credentials.
@@ -23,9 +23,9 @@ and **Linux**.
 | **Python ≥ 3.11** | Always | Package declares `Requires-Python: >=3.11`. `uv` can provision this for you. |
 | **An installer**: `uv` **or** `pipx` **or** `pip` | Install | `uv tool install` recommended (isolates the CLI and can fetch the right Python); pipx is the standard alternative. |
 | **git** | Install | The package is fetched from a Git repo/subdirectory. |
-| **Container runtime** (`docker` **or** `podman`) | `rossoctl start` (default mode) | Runs image `quay.io/aslomnet/rosscortex:latest`. **The published image is `linux/arm64` only** — see the arch note in §6. |
-| **LiteLLM/LLM API key** | `rossoctl start`, `rossoctl agent` | Injected by the proxy. `start` refuses to run without one — set it before starting (see §7). |
-| Source checkout + **`uv`** + **Go** | `rossoctl start --local` (native mode) only | Native mode builds/runs the AuthBridge helper from source. **Not available from a pip install** (the wheel ships only the CLI) — point `ROSSOCORTEX_CONTAINER_LOCAL_DIR` at a `kagenti` checkout. |
+| **Container runtime** (`docker` **or** `podman`) | `rossoctlx start` (default mode) | Runs image `quay.io/aslomnet/rosscortex:latest`. **The published image is `linux/arm64` only** — see the arch note in §6. |
+| **LiteLLM/LLM API key** | `rossoctlx start`, `rossoctlx agent` | Injected by the proxy. `start` refuses to run without one — set it before starting (see §7). |
+| Source checkout + **`uv`** + **Go** | `rossoctlx start --local` (native mode) only | Native mode builds/runs the AuthBridge helper from source. **Not available from a pip install** (the wheel ships only the CLI) — point `ROSSOCORTEX_CONTAINER_LOCAL_DIR` at a `kagenti` checkout. |
 | Network access | Install + runtime | To reach GitHub, PyPI, the container registry, and the upstream LLM API. |
 
 ### Python dependencies
@@ -48,10 +48,10 @@ These are **not** installed by pip and must be present on your system depending
 on how you run the proxy:
 
 - **Container runtime** — `docker` or `podman`. Required for the default
-  `rossoctl start` (container) mode. `rossoctl` auto-detects whichever is on
+  `rossoctlx start` (container) mode. `rossoctlx` auto-detects whichever is on
   your `PATH`.
 - **`uv` + Go + a `kagenti` source checkout** — needed only for
-  `rossoctl start --local` (native mode), which runs `rossocortex.py` directly and
+  `rossoctlx start --local` (native mode), which runs `rossocortex.py` directly and
   builds an AuthBridge proxy binary. **A pip/pipx install cannot do `--local`** on
   its own — the wheel ships only the CLI module. Set
   `ROSSOCORTEX_CONTAINER_LOCAL_DIR` to a checkout's
@@ -104,9 +104,9 @@ sudo pacman -S python python-pip git
 
 ---
 
-## 4. Install `rossoctl`
+## 4. Install `rossoctlx`
 
-Pick **one** method. Options A and B both install `rossoctl` into an isolated
+Pick **one** method. Options A and B both install `rossoctlx` into an isolated
 environment and put the command on your `PATH` — the right choice for a CLI tool.
 **`uv tool install` (Option A) is recommended.**
 
@@ -117,7 +117,7 @@ install — this provisions a throwaway environment and runs the built-in
 preflight check:
 
 ```bash
-uvx --from "git+https://github.com/aslom/kagenti.git@rossoctlx#subdirectory=scripts" rossoctl doctor
+uvx --from "git+https://github.com/aslom/kagenti.git@rossoctlx#subdirectory=scripts" rossoctlx doctor
 ```
 
 ### Option A — `uv tool install` (recommended)
@@ -135,15 +135,15 @@ curl -LsSf https://astral.sh/uv/install.sh | sh     # or: brew install uv
 powershell -c "irm https://astral.sh/uv/install.ps1 | iex"   # or: winget install astral-sh.uv
 ```
 
-**Install rossoctl:**
+**Install rossoctlx:**
 
 ```bash
 uv tool install --python 3.11 "git+https://github.com/aslom/kagenti.git@rossoctlx#subdirectory=scripts"
 uv tool update-shell     # ensures uv's bin dir is on PATH (open a new terminal after)
 ```
 
-> **Note:** like pipx, uv places the `rossoctl` shim in a bin dir that must be on
-> your `PATH`. If `rossoctl` isn't found after install, run `uv tool update-shell`
+> **Note:** like pipx, uv places the `rossoctlx` shim in a bin dir that must be on
+> your `PATH`. If `rossoctlx` isn't found after install, run `uv tool update-shell`
 > (or add the printed dir to `PATH`) and open a **new terminal**.
 
 ### Option B — pipx
@@ -156,14 +156,14 @@ brew install pipx                       # macOS
 sudo apt install -y pipx                # Linux (Debian/Ubuntu)
 python3 -m pip install --user pipx      # any OS with pip ("python -m pip" on Windows)
 
-# Install rossoctl
+# Install rossoctlx
 pipx install "git+https://github.com/aslom/kagenti.git@rossoctlx#subdirectory=scripts"
 pipx ensurepath          # adds pipx's bin dir to PATH (open a new terminal after)
 ```
 
 > **Note:** `pipx ensurepath` installs to `~/.local/bin` on macOS/Linux and
 > `%USERPROFILE%\.local\bin` on Windows. Open a **new terminal** (or
-> `source ~/.zshrc` / `source ~/.bashrc`) so the `rossoctl` command is found.
+> `source ~/.zshrc` / `source ~/.bashrc`) so the `rossoctlx` command is found.
 
 ### Option C — virtual environment (if you want to import the package)
 
@@ -183,7 +183,7 @@ python -m venv .venv
 pip install "git+https://github.com/aslom/kagenti.git@rossoctlx#subdirectory=scripts"
 ```
 
-You must activate the venv each time before using `rossoctl`.
+You must activate the venv each time before using `rossoctlx`.
 
 ### Option D — user install (quick, discouraged on Homebrew Python)
 
@@ -201,36 +201,36 @@ python3 -m pip install --user "git+https://github.com/aslom/kagenti.git@rossoctl
 ## 5. Verify the install
 
 ```bash
-rossoctl --version      # prints the client version, e.g. "rossoctl 0.1.0"
-rossoctl doctor         # environment preflight: green/red checklist + fixes
+rossoctlx --version      # prints the client version, e.g. "rossoctlx 0.1.0"
+rossoctlx doctor         # environment preflight: green/red checklist + fixes
 ```
 
-`rossoctl doctor` (alias `rossoctl preflight`) checks — **without needing a running
+`rossoctlx doctor` (alias `rossoctlx preflight`) checks — **without needing a running
 proxy** — Python version, git, container runtime *and whether its daemon responds*,
 host-vs-image architecture, credential presence, upstream, config-dir writability,
 and port availability. It exits `0` when all required checks pass and `1` otherwise,
 so you can gate scripts/CI on it. Add `--local` to also check native-mode deps.
 
-> **Note:** `rossoctl version` and `rossoctl status` query a **running** proxy, so
-> before you run `rossoctl start` they report it's not running and exit non-zero.
-> That's expected — use `rossoctl --version` / `rossoctl doctor` as your
+> **Note:** `rossoctlx version` and `rossoctlx status` query a **running** proxy, so
+> before you run `rossoctlx start` they report it's not running and exit non-zero.
+> That's expected — use `rossoctlx --version` / `rossoctlx doctor` as your
 > post-install checks.
 
 ---
 
 ## 6. Install the runtime dependencies
 
-### Container runtime (for default `rossoctl start`)
+### Container runtime (for default `rossoctlx start`)
 
-`rossoctl start` runs the proxy in a container from
+`rossoctlx start` runs the proxy in a container from
 `quay.io/aslomnet/rosscortex:latest`. Install **docker** or **podman**:
 
 > ⚠️ **Architecture:** the published image is **`linux/arm64` only** (Apple Silicon,
 > arm64 Linux). On **amd64/x86-64** hosts (most Intel/AMD Linux, WSL2, Intel Macs)
-> `rossoctl start` will fail with an `exec format error` / platform-mismatch. On
+> `rossoctlx start` will fail with an `exec format error` / platform-mismatch. On
 > those hosts, build a native image from source — see
 > [`rossocortex-container/REPRODUCE.md`](rossocortex-container/REPRODUCE.md) — then
-> `rossoctl start --image <your-image>`.
+> `rossoctlx start --image <your-image>`.
 >
 > ℹ️ **First start downloads the image** (a few hundred MB). It can take a minute and
 > may look idle while pulling; subsequent starts reuse the cached image.
@@ -261,16 +261,16 @@ sudo usermod -aG docker "$USER"   # log out/in afterwards
 sudo apt install -y podman        # or: sudo dnf install -y podman
 ```
 
-### Native mode (`rossoctl start --local`)
+### Native mode (`rossoctlx start --local`)
 
 Skip this unless you run the proxy natively instead of in a container. Native mode
 needs **all** of: `uv` (install shown in §4 Option A), **Go**, and a **`kagenti`
 source checkout** (the AuthBridge helper and its templates aren't shipped in the
-pip package). Point `rossoctl` at the checkout:
+pip package). Point `rossoctlx` at the checkout:
 
 ```bash
 export ROSSOCORTEX_CONTAINER_LOCAL_DIR=/path/to/kagenti/scripts/rossocortex-container
-rossoctl doctor --local     # verifies the native-mode prerequisites
+rossoctlx doctor --local     # verifies the native-mode prerequisites
 ```
 
 ---
@@ -286,21 +286,21 @@ printf '%s' 'sk-your-litellm-key' > ~/.config/rossocortex/credentials/LITELLM_AP
 chmod 600 ~/.config/rossocortex/credentials/LITELLM_API_KEY
 
 # Start the budget proxy in a container (needs docker/podman; first run pulls the image)
-rossoctl start --upstream <your-litellm-or-anthropic-base-url> --budget 5.0
+rossoctlx start --upstream <your-litellm-or-anthropic-base-url> --budget 5.0
 
 # Check status / version
-rossoctl status
-rossoctl version
+rossoctlx status
+rossoctlx version
 
 # Register an agent and get its proxy credentials
-rossoctl agent my-agent --budget 2.0
-rossoctl agents            # list registered agents
+rossoctlx agent my-agent --budget 2.0
+rossoctlx agents            # list registered agents
 
 # Tail the request log
-rossoctl log -f
+rossoctlx log -f
 
 # Stop the proxy
-rossoctl stop
+rossoctlx stop
 ```
 
 Useful environment variables the CLI reads:
@@ -314,7 +314,7 @@ Useful environment variables the CLI reads:
 Enable shell tab-completion (bash/zsh/fish):
 
 ```bash
-rossoctl completions        # prints setup instructions for your $SHELL
+rossoctlx completions        # prints setup instructions for your $SHELL
 ```
 
 ---
@@ -345,17 +345,17 @@ pip uninstall kagenti-rossoctl
 
 ## 9. Troubleshooting
 
-> Tip: `rossoctl doctor` diagnoses most of the runtime rows below in one shot.
+> Tip: `rossoctlx doctor` diagnoses most of the runtime rows below in one shot.
 
 | Symptom | Fix |
 |---|---|
 | `error: externally-managed-environment` | Use `uv tool install` (Option A) or pipx (Option B) instead of a bare `pip install`. |
-| `rossoctl: command not found` after install | Run `uv tool update-shell` (uv) or `pipx ensurepath` (pipx), then open a new terminal or `source` your shell rc file. |
+| `rossoctlx: command not found` after install | Run `uv tool update-shell` (uv) or `pipx ensurepath` (pipx), then open a new terminal or `source` your shell rc file. |
 | `git` errors during install / `Cannot find command 'git'` | Git is required because the package installs from a Git repo — install Git (§3) and rerun. |
-| `ERROR: Cannot connect to rossocortex …` from `version`/`status` | Expected until you run `rossoctl start`. Use `rossoctl --help` to check the install. |
-| `rossoctl start` reports no LiteLLM key | Create `~/.config/rossocortex/credentials/LITELLM_API_KEY` (see §7). |
-| `rossoctl start` can't find a runtime | Install and start docker or podman; ensure it's on your `PATH`. |
-| `port already in use` / bind failure on start | `start` auto-picks free ports (proxy defaults to `8185`, control `8186`). If it can't, run `rossoctl stop` to clear an old instance, or pass `--port`/`--control-port`. |
+| `ERROR: Cannot connect to rossocortex …` from `version`/`status` | Expected until you run `rossoctlx start`. Use `rossoctlx --help` to check the install. |
+| `rossoctlx start` reports no LiteLLM key | Create `~/.config/rossocortex/credentials/LITELLM_API_KEY` (see §7). |
+| `rossoctlx start` can't find a runtime | Install and start docker or podman; ensure it's on your `PATH`. |
+| `port already in use` / bind failure on start | `start` auto-picks free ports (proxy defaults to `8185`, control `8186`). If it can't, run `rossoctlx stop` to clear an old instance, or pass `--port`/`--control-port`. |
 | PowerShell: "running scripts is disabled" on venv activate | Run `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` first (see §4 Option C). |
 | `exec format error` / `no matching manifest for linux/amd64` on `start` | The published image is arm64-only. Build a native image (§6 / REPRODUCE.md) and use `--image`. |
 | `start` hangs / looks idle on first run | It's pulling the image (~hundreds of MB). Wait, or pre-pull with `docker pull quay.io/aslomnet/rosscortex:latest`. |
