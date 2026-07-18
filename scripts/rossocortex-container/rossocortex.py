@@ -61,6 +61,11 @@ CREDENTIALS_DIR = Path(os.environ.get("ROSSOCORTEX_CREDENTIALS", CONFIG_DIR / "c
 SPEND_FILE = Path(os.environ.get("ROSSOCORTEX_SPEND_FILE", CONFIG_DIR / "spend.json"))
 AGENTS_FILE = CONFIG_DIR / "agents.json"
 
+# Eventing feature flag (issues #1274/#2044/#2045/#1460). Default off: when unset,
+# rossocortex behaves exactly as before and no eventing code paths run.
+EVENTING_ENABLED = os.environ.get("KAGENTI_FEATURE_EVENTING", "").lower() == "true"
+EVENTING_BRIDGE_SCRIPT = SCRIPT_DIR / "eventing_bridge.py"
+
 _spend_lock = threading.Lock()
 LOG_FILE = CONFIG_DIR / "rossocortex.log"
 LOG_MAX_DAYS = 10
@@ -882,6 +887,25 @@ def main():
     control_thread.start()
     print(f"  Control API: http://localhost:{args.control_port}/version")
 
+    # Eventing bridge (feature-flagged, off by default). Spawned as a subprocess,
+    # mirroring the AuthBridge lifecycle above. See eventing_bridge.py.
+    eventing_proc = None
+    if EVENTING_ENABLED:
+        print(f"  Eventing:   KAGENTI_FEATURE_EVENTING=true, starting {EVENTING_BRIDGE_SCRIPT.name}")
+        if not EVENTING_BRIDGE_SCRIPT.exists():
+            print(f"  WARNING: {EVENTING_BRIDGE_SCRIPT} not found; eventing disabled", file=sys.stderr)
+        else:
+            eventing_proc = subprocess.Popen(
+                [str(EVENTING_BRIDGE_SCRIPT)],
+                stdout=sys.stderr,
+                stderr=sys.stderr,
+            )
+            import time
+            time.sleep(1)
+            if eventing_proc.poll() is not None:
+                print(f"  WARNING: eventing bridge exited immediately (code {eventing_proc.returncode})", file=sys.stderr)
+                eventing_proc = None
+
     def _cleanup():
         _shutdown_all_authbridges()
         if authbridge_proc and authbridge_proc.poll() is None:
@@ -890,6 +914,12 @@ def main():
                 authbridge_proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 authbridge_proc.kill()
+        if eventing_proc and eventing_proc.poll() is None:
+            eventing_proc.send_signal(signal.SIGTERM)
+            try:
+                eventing_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                eventing_proc.kill()
 
     atexit.register(_cleanup)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
